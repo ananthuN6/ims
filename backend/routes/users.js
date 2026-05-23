@@ -6,7 +6,7 @@ const router  = express.Router();
 const { v4: uuidv4 } = require('uuid');
 const { Users } = require('../db/fileDb');
 const { getOrgUsers } = require('../services/emailService');
-const cfg = require('../../config/config');
+const cfg = require('../config');
 
 // ── Middleware: require ISO role ─────────────────────────────
 function requireISO(req, res, next) {
