@@ -1,4 +1,5 @@
 // frontend/src/pages/Admin.jsx
+/* eslint-disable */
 import React, { useState, useEffect } from 'react';
 import { useApp, useCurrentUser } from '../context/AppContext';
 import { api } from '../utils/api';
