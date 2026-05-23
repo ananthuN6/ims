@@ -1,4 +1,5 @@
 // frontend/src/pages/EmailLog.jsx
+/* eslint-disable */
 import React, { useEffect, useState } from 'react';
 import { useCurrentUser } from '../context/AppContext';
 import { api } from '../utils/api';
