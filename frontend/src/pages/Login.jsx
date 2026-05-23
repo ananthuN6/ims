@@ -4,7 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import { useMsal } from '@azure/msal-react';
 import { loginRequest } from '../auth/msalConfig';
 import { useApp, useCurrentUser } from '../context/AppContext';
-import { api, setApiUser } from '../utils/api';
+import { api} from '../utils/api';
 import { ShieldCheck } from 'lucide-react';
 import { Spinner } from '../components/ui';
 
