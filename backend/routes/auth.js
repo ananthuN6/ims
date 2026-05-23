@@ -4,7 +4,7 @@
 
 const express = require('express');
 const router  = express.Router();
-const cfg     = require('../../config/config');
+const cfg     = require('../config');
 const { Users } = require('../db/fileDb');
 
 // Simple JWKS-based verification using Microsoft's public keys
