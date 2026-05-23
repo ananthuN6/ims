@@ -5,7 +5,7 @@
 
 const fs   = require('fs');
 const path = require('path');
-const cfg  = require('../../config/config');
+const cfg  = require('../config');
 
 // ── Bootstrap: create db dir + empty files if they don't exist ──────────────
 function bootstrap() {
