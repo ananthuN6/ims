@@ -6,21 +6,27 @@
 
 require('isomorphic-fetch');
 const { ConfidentialClientApplication } = require('@azure/msal-node');
-const cfg = require('../../config/config');
+const cfg = require('../config');
 const { EmailLog } = require('../db/fileDb');
 const { v4: uuidv4 } = require('uuid');
 
-// ── MSAL app (client credentials, no user interaction) ──────────────────────
-const msalApp = new ConfidentialClientApplication({
-  auth: {
-    clientId:     cfg.azure.clientId,
-    clientSecret: cfg.azure.clientSecret,
-    authority:    `https://login.microsoftonline.com/${cfg.azure.tenantId}`,
-  },
-});
+// ── MSAL app (lazy init so server starts even without Azure creds) ───────────
+let msalApp = null;
+function getMsalApp() {
+  if (!msalApp) {
+    msalApp = new ConfidentialClientApplication({
+      auth: {
+        clientId:     cfg.azure.clientId,
+        clientSecret: cfg.azure.clientSecret,
+        authority:    `https://login.microsoftonline.com/${cfg.azure.tenantId}`,
+      },
+    });
+  }
+  return msalApp;
+}
 
 async function getAccessToken() {
-  const result = await msalApp.acquireTokenByClientCredential({
+  const result = await getMsalApp().acquireTokenByClientCredential({
     scopes: ['https://graph.microsoft.com/.default'],
   });
   if (!result?.accessToken) throw new Error('Failed to acquire Graph token');
