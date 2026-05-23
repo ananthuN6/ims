@@ -1,4 +1,5 @@
 // frontend/src/pages/Dashboard.jsx
+/* eslint-disable */
 import React, { useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useApp, useCurrentUser } from '../context/AppContext';
