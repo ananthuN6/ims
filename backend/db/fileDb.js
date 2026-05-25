@@ -1,112 +1,108 @@
-// backend/db/fileDb.js
-// Lightweight JSON file database.
-// Each collection is a single .json file: { "rows": [...] }
-// Migration to MSSQL: replace every export here with a Sequelize/mssql call.
+const { Pool } = require('pg');
 
-const fs   = require('fs');
-const path = require('path');
-const cfg  = require('../config');
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: { rejectUnauthorized: false },
+});
 
-// ── Bootstrap: create db dir + empty files if they don't exist ──────────────
-function bootstrap() {
-  const dir = path.isAbsolute(cfg.db.dir)
-    ? cfg.db.dir
-    : path.resolve(__dirname, '..', cfg.db.dir);
-  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-
-  const files = {
-    [path.resolve(__dirname, '..', cfg.db.users)]:     { rows: [] },
-    [path.resolve(__dirname, '..', cfg.db.incidents)]: { rows: [] },
-    [path.resolve(__dirname, '..', cfg.db.emailLog)]:  { rows: [] },
-  };
-
-  for (const [filePath, seed] of Object.entries(files)) {
-    if (!fs.existsSync(filePath)) {
-      fs.writeFileSync(filePath, JSON.stringify(seed, null, 2), 'utf8');
-      console.log(`[DB] Created ${filePath}`);
-    }
-  }
+// ── Bootstrap: create tables if they don't exist ─────────────────────────────
+async function bootstrap() {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS users (
+      id TEXT PRIMARY KEY,
+      data JSONB NOT NULL
+    );
+  `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS incidents (
+      id TEXT PRIMARY KEY,
+      data JSONB NOT NULL
+    );
+  `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS email_log (
+      id TEXT PRIMARY KEY,
+      data JSONB NOT NULL
+    );
+  `);
+  console.log('[DB] PostgreSQL tables ready');
 }
 
-// ── Generic helpers ──────────────────────────────────────────────────────────
-function readCollection(filePath) {
-  const abs = path.isAbsolute(filePath)
-    ? filePath
-    : path.resolve(__dirname, '..', filePath);
-  try {
-    const raw = fs.readFileSync(abs, 'utf8');
-    return JSON.parse(raw).rows || [];
-  } catch (e) {
-    console.error('[DB] read error', filePath, e.message);
-    return [];
-  }
-}
-
-function writeCollection(filePath, rows) {
-  const abs = path.isAbsolute(filePath)
-    ? filePath
-    : path.resolve(__dirname, '..', filePath);
-  fs.writeFileSync(abs, JSON.stringify({ rows }, null, 2), 'utf8');
-}
-
-// ── Users ────────────────────────────────────────────────────────────────────
+// ── Users ─────────────────────────────────────────────────────────────────────
 const Users = {
-  all:       ()      => readCollection(cfg.db.users),
-  findById:  (id)    => Users.all().find(u => u.id === id) || null,
-  findByEmail:(email)=> Users.all().find(u => u.email.toLowerCase() === email.toLowerCase()) || null,
-  byRole:    (role)  => Users.all().filter(u => u.role === role),
-
-  create(data) {
-    const rows = Users.all();
-    rows.push(data);
-    writeCollection(cfg.db.users, rows);
+  async all() {
+    const res = await pool.query('SELECT data FROM users');
+    return res.rows.map(r => r.data);
+  },
+  async findById(id) {
+    const res = await pool.query('SELECT data FROM users WHERE id=$1', [id]);
+    return res.rows[0]?.data || null;
+  },
+  async findByEmail(email) {
+    const res = await pool.query(
+      "SELECT data FROM users WHERE lower(data->>'email') = lower($1)", [email]
+    );
+    return res.rows[0]?.data || null;
+  },
+  async byRole(role) {
+    const res = await pool.query(
+      "SELECT data FROM users WHERE data->>'role' = $1", [role]
+    );
+    return res.rows.map(r => r.data);
+  },
+  async create(data) {
+    await pool.query('INSERT INTO users(id, data) VALUES($1,$2)', [data.id, data]);
     return data;
   },
-
-  update(id, patch) {
-    const rows = Users.all().map(u => u.id === id ? { ...u, ...patch } : u);
-    writeCollection(cfg.db.users, rows);
-    return rows.find(u => u.id === id);
+  async update(id, patch) {
+    const res = await pool.query(
+      'UPDATE users SET data = data || $2 WHERE id=$1 RETURNING data',
+      [id, patch]
+    );
+    return res.rows[0]?.data || null;
   },
-
-  delete(id) {
-    const rows = Users.all().filter(u => u.id !== id);
-    writeCollection(cfg.db.users, rows);
+  async delete(id) {
+    await pool.query('DELETE FROM users WHERE id=$1', [id]);
   },
 };
 
-// ── Incidents ────────────────────────────────────────────────────────────────
+// ── Incidents ─────────────────────────────────────────────────────────────────
 const Incidents = {
-  all:       ()   => readCollection(cfg.db.incidents),
-  findById:  (id) => Incidents.all().find(i => i.id === id) || null,
-
-  create(data) {
-    const rows = Incidents.all();
-    rows.push(data);
-    writeCollection(cfg.db.incidents, rows);
+  async all() {
+    const res = await pool.query('SELECT data FROM incidents ORDER BY data->>'createdAt' DESC');
+    return res.rows.map(r => r.data);
+  },
+  async findById(id) {
+    const res = await pool.query('SELECT data FROM incidents WHERE id=$1', [id]);
+    return res.rows[0]?.data || null;
+  },
+  async create(data) {
+    await pool.query('INSERT INTO incidents(id, data) VALUES($1,$2)', [data.id, data]);
     return data;
   },
-
-  update(id, patch) {
-    const rows = Incidents.all().map(i => i.id === id ? { ...i, ...patch, updatedAt: new Date().toISOString() } : i);
-    writeCollection(cfg.db.incidents, rows);
-    return rows.find(i => i.id === id);
+  async update(id, patch) {
+    const updated = { ...patch, updatedAt: new Date().toISOString() };
+    const res = await pool.query(
+      'UPDATE incidents SET data = data || $2 WHERE id=$1 RETURNING data',
+      [id, updated]
+    );
+    return res.rows[0]?.data || null;
   },
 };
 
-// ── Email Log ────────────────────────────────────────────────────────────────
+// ── Email Log ─────────────────────────────────────────────────────────────────
 const EmailLog = {
-  all: () => readCollection(cfg.db.emailLog),
-
-  append(entry) {
-    const rows = EmailLog.all();
-    rows.push(entry);
-    writeCollection(cfg.db.emailLog, rows);
+  async all() {
+    const res = await pool.query('SELECT data FROM email_log ORDER BY data->>'timestamp' DESC');
+    return res.rows.map(r => r.data);
+  },
+  async append(entry) {
+    await pool.query('INSERT INTO email_log(id, data) VALUES($1,$2)', [entry.id, entry]);
     return entry;
   },
 };
 
-// Run bootstrap when module is first loaded
-bootstrap();
+// Run bootstrap
+bootstrap().catch(err => console.error('[DB] Bootstrap error:', err));
 
 module.exports = { Users, Incidents, EmailLog };
