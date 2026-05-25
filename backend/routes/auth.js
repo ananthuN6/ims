@@ -1,14 +1,8 @@
 // backend/routes/auth.js
-// The frontend sends the MS ID token; we verify it with JWKS,
-// look up the user in our DB, and return their IMS profile.
-
 const express = require('express');
 const router  = express.Router();
 const cfg     = require('../config');
 const { Users } = require('../db/fileDb');
-
-// Simple JWKS-based verification using Microsoft's public keys
-// We use the lightweight manual approach to avoid heavy JWT libraries
 const https = require('https');
 
 function fetchJwks() {
@@ -25,7 +19,6 @@ function fetchJwks() {
   });
 }
 
-// Decode JWT payload without verification (verification happens via token info endpoint)
 function decodeJwtPayload(token) {
   try {
     const parts = token.split('.');
@@ -35,7 +28,6 @@ function decodeJwtPayload(token) {
   } catch { return null; }
 }
 
-// Verify the token by calling MS token info endpoint (userinfo)
 async function verifyMsToken(accessToken) {
   return new Promise((resolve, reject) => {
     const options = {
@@ -61,54 +53,48 @@ async function verifyMsToken(accessToken) {
 }
 
 // POST /api/auth/login
-// Body: { accessToken }  (MS access token with User.Read scope)
 router.post('/login', async (req, res) => {
   const { accessToken } = req.body;
   if (!accessToken) return res.status(400).json({ error: 'accessToken required' });
 
   try {
-    // Verify token and get profile from Graph
     const profile = await verifyMsToken(accessToken);
     const email = (profile.mail || profile.userPrincipalName || '').toLowerCase();
 
     if (!email) return res.status(401).json({ error: 'Could not resolve email from MS token' });
 
-    // Is this the hardcoded admin?
     const isAdmin = email === cfg.admin.email.toLowerCase();
 
-    // Look up in our user DB
-    let user = Users.findByEmail(email);
+    let user = await Users.findByEmail(email);
 
-    // Auto-create user if not yet in DB
     if (!user) {
       const { v4: uuidv4 } = require('uuid');
-      
       if (isAdmin) {
-        // Auto-create admin with ISO role
-        user = Users.create({
+        user = await Users.create({
           id:        uuidv4(),
           name:      profile.displayName || cfg.admin.name,
-          email:     email,
+          email,
           role:      'iso',
           isAdmin:   true,
           createdAt: new Date().toISOString(),
         });
       } else {
-        // Auto-create regular user as employee
-        user = Users.create({
+        user = await Users.create({
           id:        uuidv4(),
           name:      profile.displayName || '',
-          email:     email,
+          email,
           role:      'employee',
           isAdmin:   false,
           createdAt: new Date().toISOString(),
         });
       }
+    } else if (isAdmin && (user.role !== 'iso' || !user.isAdmin)) {
+      // Fix role if admin was previously created with wrong role
+      user = await Users.update(user.id, { role: 'iso', isAdmin: true });
     }
 
-    // Sync display name from MS profile
     if (user && user.name !== profile.displayName && profile.displayName) {
-      user = Users.update(user.id, { name: profile.displayName });
+      user = await Users.update(user.id, { name: profile.displayName });
     }
 
     return res.json({
