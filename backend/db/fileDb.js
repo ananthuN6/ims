@@ -9,7 +9,9 @@ const cfg  = require('../config');
 
 // ── Bootstrap: create db dir + empty files if they don't exist ──────────────
 function bootstrap() {
-  const dir = path.resolve(__dirname, '..', cfg.db.dir);
+  const dir = path.isAbsolute(cfg.db.dir)
+    ? cfg.db.dir
+    : path.resolve(__dirname, '..', cfg.db.dir);
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 
   const files = {
@@ -28,7 +30,9 @@ function bootstrap() {
 
 // ── Generic helpers ──────────────────────────────────────────────────────────
 function readCollection(filePath) {
-  const abs = path.resolve(__dirname, '..', filePath);
+  const abs = path.isAbsolute(filePath)
+    ? filePath
+    : path.resolve(__dirname, '..', filePath);
   try {
     const raw = fs.readFileSync(abs, 'utf8');
     return JSON.parse(raw).rows || [];
@@ -39,7 +43,9 @@ function readCollection(filePath) {
 }
 
 function writeCollection(filePath, rows) {
-  const abs = path.resolve(__dirname, '..', filePath);
+  const abs = path.isAbsolute(filePath)
+    ? filePath
+    : path.resolve(__dirname, '..', filePath);
   fs.writeFileSync(abs, JSON.stringify({ rows }, null, 2), 'utf8');
 }
 
