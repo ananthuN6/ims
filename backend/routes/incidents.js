@@ -148,8 +148,10 @@ async function auditOverdueIncidents() {
 }
 
 // ── ID generator ─────────────────────────────────────────────
-function genIncidentId() {
-  return `INC-${Math.floor(10000 + Math.random() * 90000)}`;
+async function genIncidentId() {
+  const all = await Incidents.all();
+  const nextNum = String(all.length + 1).padStart(4, '0');
+  return `INC-${nextNum}`;
 }
 
 // GET /api/incidents
@@ -175,7 +177,7 @@ router.post('/', requireAuth, async (req, res) => {
 
   const incident = Incidents.create({
     id: uuidv4(),
-    incidentId:      genIncidentId(),
+    incidentId:     await genIncidentId(),
     description:     description.trim(),
     incidentDate,
     reportedBy:      req.imsUser.id,
