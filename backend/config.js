@@ -14,9 +14,9 @@ module.exports = {
     name:  process.env.ADMIN_NAME  || 'Admin ISO',
   },
   db: {
-  dir:       '/app/data',
-  users:     '/app/data/users.json',
-  incidents: '/app/data/incidents.json',
-  emailLog:  '/app/data/emailLog.json',
+  dir:       './db',
+  users:     './db/users.json',
+  incidents: './db/incidents.json',
+  emailLog:  './db/emailLog.json',
 },
 };
