@@ -191,6 +191,18 @@ function buildHtml(title, lines, incidentId, appUrl = '') {
 }
 
 // ── Typed email senders ──────────────────────────────────────────────────────
+// Recipient matrix:
+//   Report incident     → IRT
+//   Validate → assign   → Owner + Reporter
+//   Validate → reject   → Reporter + Owner + IRT
+//   Submit RCA          → IRT + Owner
+//   Approve RCA         → Owner + IRT
+//   Reject RCA          → Owner + IRT
+//   Owner closes        → IRT + Owner
+//   Approve closure     → Owner + Reporter + IRT
+//   Reject closure      → Owner + IRT
+//   Overdue / RCA reminder → Owner + IRT
+
 const appUrl = cfg.server?.frontendUrl || '';
 
 async function notifyNewIncident(incident, { actorEmail } = {}) {
@@ -238,9 +250,24 @@ async function notifyAssigned(incident, { actorEmail } = {}) {
 async function getIRTMemberEmails() {
   const all = await Users.all();
   return all
-    .filter(u => u.role === IRT_ROLE || u.role === 'iso')
+    .filter(u => u.role === IRT_ROLE || u.role === 'iso' || u.isAdmin)
     .map(u => u.email)
     .filter(Boolean);
+}
+
+/** Notify reporter, owner, RCA submitter, and all IRT members */
+async function notifyAllInvolved(incident, { actorEmail, subject, type, title, lines }) {
+  await sendToInvolved(incident, {
+    reporter: true,
+    owner: true,
+    irt: true,
+    rcaSubmitter: true,
+    actorEmail,
+    subject,
+    type,
+    title,
+    lines,
+  });
 }
 
 /** Collect emails for everyone involved in an incident */
@@ -328,6 +355,7 @@ async function notifyRejected(incident, { comment, actorEmail } = {}) {
   const rejectionComment = comment || incident.isoComments || 'No comments provided.';
   await sendToInvolved(incident, {
     reporter: true,
+    owner: true,
     irt: true,
     actorEmail,
     subject: `[IMS] Incident Rejected – ${incident.incidentId}`,
@@ -358,32 +386,21 @@ async function getAdminRejectRecipients(incident, toStatus, fromStatus) {
 }
 
 async function notifyRcaRejected(incident, { fromStatus, toStatus, comment, rejectedBy, actorEmail }) {
-  const recipients = withoutActor(
-    await getAdminRejectRecipients(incident, toStatus, fromStatus),
-    actorEmail
-  );
-  if (!recipients.length) {
-    console.warn('[Email] notifyRcaRejected: no recipients for', incident.incidentId);
-    return;
-  }
-
-  await sendEmail({
-    to: recipients,
+  await sendToInvolved(incident, {
+    owner: true,
+    irt: true,
+    actorEmail,
     subject: `[IMS] RCA Rejected – ${incident.incidentId}`,
     type: 'rca_rejected',
-    htmlBody: buildHtml(
-      'Your RCA Has Been Rejected',
-      [
-        `<strong style="color:#f0f4ff;">Incident:</strong> ${incident.incidentId}`,
-        `<strong style="color:#f0f4ff;">Previous status:</strong> ${fromStatus}`,
-        `<strong style="color:#f0f4ff;">Current status:</strong> ${toStatus}`,
-        `<strong style="color:#f0f4ff;">Rejected by:</strong> ${rejectedBy || 'IRT'}`,
-        `<strong style="color:#f0f4ff;">Comments:</strong><br>${comment || incident.isoComments || 'No comments provided.'}`,
-        `<br>Please log in to IMS, update your RCA, and resubmit.`,
-      ],
-      incident.incidentId,
-      appUrl
-    ),
+    title: 'RCA Rejected',
+    lines: [
+      `<strong style="color:#f0f4ff;">Incident:</strong> ${incident.incidentId}`,
+      `<strong style="color:#f0f4ff;">Previous status:</strong> ${fromStatus}`,
+      `<strong style="color:#f0f4ff;">Current status:</strong> ${toStatus}`,
+      `<strong style="color:#f0f4ff;">Rejected by:</strong> ${rejectedBy || 'IRT'}`,
+      `<strong style="color:#f0f4ff;">Reason:</strong><br>${comment || incident.isoComments || 'No reason provided.'}`,
+      `<br>Please log in to IMS, update your RCA, and resubmit.`,
+    ],
   });
 }
 
@@ -424,7 +441,6 @@ async function notifyAdminReopened(incident, { fromStatus, toStatus, comment, re
 async function notifyClosureSubmitted(incident, { actorEmail } = {}) {
   await sendToInvolved(incident, {
     irt: true,
-    reporter: true,
     owner: true,
     actorEmail,
     subject: `[IMS] RCA Submitted – ${incident.incidentId}`,
@@ -433,7 +449,7 @@ async function notifyClosureSubmitted(incident, { actorEmail } = {}) {
     lines: [
       `<strong style="color:#f0f4ff;">Incident:</strong> ${incident.incidentId}`,
       `<strong style="color:#f0f4ff;">Submitted by:</strong> ${incident.ownerName || 'Owner'}`,
-      `<br>RCA has been submitted. IRT will review and approve the RCA.`,
+      `<br>RCA has been submitted. IRT will approve or reject the RCA, then the owner may close the incident.`,
     ],
   });
 }
@@ -442,7 +458,6 @@ async function notifyResponseReminder(incident, { actorEmail } = {}) {
   await sendToInvolved(incident, {
     owner: true,
     irt: true,
-    reporter: true,
     actorEmail,
     subject: `[IMS] RCA Response Overdue – ${incident.incidentId}`,
     type: 'response_reminder',
@@ -457,19 +472,52 @@ async function notifyResponseReminder(incident, { actorEmail } = {}) {
   });
 }
 
+async function notifyOwnerClosed(incident, { actorEmail } = {}) {
+  await sendToInvolved(incident, {
+    irt: true,
+    owner: true,
+    actorEmail,
+    subject: `[IMS] Closure Submitted – Approval Needed – ${incident.incidentId}`,
+    type: 'owner_closed',
+    title: 'Owner Submitted Closure – IRT Review Required',
+    lines: [
+      `<strong style="color:#f0f4ff;">Incident:</strong> ${incident.incidentId}`,
+      `<strong style="color:#f0f4ff;">Closed by:</strong> ${incident.reviewedBy || incident.ownerName || 'Owner'}`,
+      `<strong style="color:#f0f4ff;">Closed date:</strong> ${incident.closedDate || '—'}`,
+      `<br>The owner has submitted closure details. IRT should approve or reject the closure to complete the workflow.`,
+    ],
+  });
+}
+
 async function notifyAdminApproved(incident, { actorEmail, approvedBy } = {}) {
   await sendToInvolved(incident, {
     owner: true,
-    reporter: true,
-    rcaSubmitter: true,
+    irt: true,
     actorEmail,
     subject: `[IMS] RCA Approved – ${incident.incidentId}`,
     type: 'admin_approved',
-    title: 'RCA Approved for Final Closure',
+    title: 'RCA Approved',
     lines: [
       `<strong style="color:#f0f4ff;">Incident:</strong> ${incident.incidentId}`,
       `<strong style="color:#f0f4ff;">Approved by:</strong> ${approvedBy || 'IRT'}`,
-      `<br>RCA is approved. The owner or IRT may complete final closure in IMS.`,
+      `<br>RCA is approved. The owner may now complete incident closure in IMS.`,
+    ],
+  });
+}
+
+async function notifyClosureRejected(incident, { comment, rejectedBy, actorEmail } = {}) {
+  await sendToInvolved(incident, {
+    owner: true,
+    irt: true,
+    actorEmail,
+    subject: `[IMS] Closure Rejected – ${incident.incidentId}`,
+    type: 'closure_rejected',
+    title: 'Closure Rejected – Action Required',
+    lines: [
+      `<strong style="color:#f0f4ff;">Incident:</strong> ${incident.incidentId}`,
+      `<strong style="color:#f0f4ff;">Rejected by:</strong> ${rejectedBy || 'IRT'}`,
+      `<strong style="color:#f0f4ff;">Reason:</strong><br>${comment || 'No reason provided.'}`,
+      `<br>RCA remains approved. The owner should update closure details and close again.`,
     ],
   });
 }
@@ -478,7 +526,6 @@ async function notifyOverdue(incident, { actorEmail } = {}) {
   await sendToInvolved(incident, {
     owner: true,
     irt: true,
-    reporter: true,
     actorEmail,
     subject: `[IMS] Incident Overdue – ${incident.incidentId}`,
     type: 'overdue',
@@ -497,16 +544,16 @@ async function notifyClosed(incident, { actorEmail, closedBy } = {}) {
     owner: true,
     reporter: true,
     irt: true,
-    rcaSubmitter: true,
     actorEmail,
-    subject: `[IMS] Incident Closed – ${incident.incidentId}`,
+    subject: `[IMS] Closure Approved – Incident Closed – ${incident.incidentId}`,
     type: 'closed',
-    title: 'Incident Closed',
+    title: 'Closure Approved – Incident Closed',
     lines: [
       `<strong style="color:#f0f4ff;">Incident:</strong> ${incident.incidentId}`,
-      `<strong style="color:#f0f4ff;">Closed by:</strong> ${closedBy || incident.reviewedBy || 'IRT'}`,
-      `<strong style="color:#f0f4ff;">Closed on:</strong> ${incident.closedDate}`,
+      `<strong style="color:#f0f4ff;">Approved by:</strong> ${closedBy || incident.reviewedBy || 'IRT'}`,
+      `<strong style="color:#f0f4ff;">Closed on:</strong> ${incident.closedDate || '—'}`,
       `<strong style="color:#f0f4ff;">Lessons Learned:</strong><br>${incident.lessonsLearned || '—'}`,
+      `<br>The incident workflow is complete.`,
     ],
   });
 }
@@ -522,6 +569,8 @@ module.exports = {
   resolveRcaSubmitterEmail,
   notifyClosureSubmitted,
   notifyResponseReminder,
+  notifyOwnerClosed,
+  notifyClosureRejected,
   notifyAdminApproved,
   notifyOverdue,
   notifyClosed,

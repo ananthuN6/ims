@@ -6,6 +6,7 @@ const { Users, Incidents, EmailLog } = require('../db/fileDb');
 const email = require('../services/emailService');
 const {
   STATUS_PENDING_IRT_CLOSURE,
+  STATUS_PENDING_CLOSURE_APPROVAL,
   PENDING_CLOSURE_STATUSES,
   hasIRTRole,
   isPendingIRTClosure,
@@ -34,7 +35,7 @@ async function requireIRT(req, res, next) {
 
 // ── Visibility filter ─────────────────────────────────────────
 function visibleTo(incident, user) {
-  if (hasIRTRole(user) || user.isAdmin) return true;
+  if (hasIRTRole(user)) return true;
   const userEmail = user.email?.toLowerCase();
   const userName = user.name?.toLowerCase();
   const ownerEmail = incident.ownerEmail?.toLowerCase();
@@ -106,15 +107,16 @@ function shouldThrottleResponseReminder(incident, now) {
   return new Date(incident.responseNotifiedAt).getTime() + 3600000 <= new Date(now).getTime();
 }
 
-function getAdminRevertStatus(status) {
-  switch (status) {
-    case 'Closed': return STATUS_PENDING_IRT_CLOSURE;
-    case 'Admin Approved': return 'Pending Admin Approval';
-    case 'Overdue':
-    case 'Pending Admin Approval': return 'Assigned';
-    case 'Assigned': return 'Submitted';
-    default: return status;
-  }
+function hasRcaSubmitted(inc) {
+  return !!(inc.rca && inc.correction && inc.correctiveAction) || !!inc.responseSubmittedAt;
+}
+
+function isPendingRcaApproval(status) {
+  return ['Pending Admin Approval', 'Overdue'].includes(status);
+}
+
+function appendLog(inc, entry) {
+  return [...(inc.actionLog || []), entry];
 }
 
 async function auditOverdueIncidents() {
@@ -127,7 +129,7 @@ async function auditOverdueIncidents() {
       email.notifyResponseReminder(updated, {}).catch(console.error);
     }
 
-    if (!['Assigned', ...PENDING_CLOSURE_STATUSES].includes(inc.status)) continue;
+    if (!['Assigned', 'Pending Admin Approval', 'Overdue'].includes(inc.status)) continue;
     if (!isPastTargetDate(inc.targetDate)) continue;
 
     const updated = await Incidents.update(inc.id, {
@@ -366,26 +368,23 @@ router.patch('/:id/closure', requireAuth, async (req, res) => {
   }
 });
 
-// PATCH /api/incidents/:id/approve — IRT approves RCA
-router.patch('/:id/approve', requireIRT, async (req, res) => {
+// PATCH /api/incidents/:id/approve-rca — IRT approves submitted RCA
+router.patch('/:id/approve-rca', requireIRT, async (req, res) => {
   try {
     const inc = await Incidents.findById(req.params.id);
     if (!inc) return res.status(404).json({ error: 'Not found' });
-    if (!['Pending Admin Approval','Overdue'].includes(inc.status)) {
+    if (!isPendingRcaApproval(inc.status) || !hasRcaSubmitted(inc)) {
       return res.status(409).json({ error: 'Incident is not awaiting RCA approval' });
     }
 
     const updated = await Incidents.update(inc.id, {
       status: 'Admin Approved',
-      actionLog: [
-        ...(inc.actionLog || []),
-        {
-          id: uuidv4(), action: 'RCA Approved',
-          fromStatus: inc.status, toStatus: 'Admin Approved',
-          by: req.imsUser.name, byEmail: req.imsUser.email, role: req.imsUser.role,
-          comment: 'RCA approved; owner or IRT may complete final closure', at: new Date().toISOString(),
-        },
-      ],
+      actionLog: appendLog(inc, {
+        id: uuidv4(), action: 'RCA Approved',
+        fromStatus: inc.status, toStatus: 'Admin Approved',
+        by: req.imsUser.name, byEmail: req.imsUser.email, role: req.imsUser.role,
+        comment: 'RCA approved; owner may complete incident closure', at: new Date().toISOString(),
+      }),
     });
 
     email.notifyAdminApproved(updated, {
@@ -395,51 +394,67 @@ router.patch('/:id/approve', requireIRT, async (req, res) => {
 
     res.json(updated);
   } catch (err) {
-    console.error('[Incidents] approve error:', err.message);
+    console.error('[Incidents] approve-rca error:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
 
-// PATCH /api/incidents/:id/close
-router.patch('/:id/close', requireAuth, async (req, res) => {
+// PATCH /api/incidents/:id/reject-rca — IRT rejects RCA (returns to Assigned)
+router.patch('/:id/reject-rca', requireIRT, async (req, res) => {
   try {
     const inc = await Incidents.findById(req.params.id);
     if (!inc) return res.status(404).json({ error: 'Not found' });
-    if (inc.status !== 'Admin Approved') return res.status(409).json({ error: 'RCA must be approved before closure' });
-
-    const normalizedUserEmail = req.imsUser.email?.toLowerCase();
-    const normalizedUserName  = req.imsUser.name?.toLowerCase();
-    const ownerEmail = inc.ownerEmail?.toLowerCase();
-    const ownerName  = inc.ownerName?.toLowerCase();
-    const isOwner = req.imsUser.id === inc.ownerId
-      || (ownerEmail && normalizedUserEmail === ownerEmail)
-      || (!inc.ownerId && ownerName && normalizedUserName === ownerName);
-    const isIRT = hasIRTRole(req.imsUser);
-    if (!isOwner && !isIRT) return res.status(403).json({ error: 'Only the assigned owner or IRT can close this incident' });
-
-    const { closedDate, reviewDate, reviewedBy, lessonsLearned } = req.body;
-    if (!closedDate) return res.status(400).json({ error: 'closedDate required' });
-
-    const finalReviewDate = reviewDate || closedDate;
-    const finalReviewedBy = reviewedBy || (isOwner ? req.imsUser.name : '');
-
-    if (isIRT && (!reviewDate || !reviewedBy)) {
-      return res.status(400).json({ error: 'reviewDate and closedBy required for IRT closure' });
+    if (!isPendingRcaApproval(inc.status) || !hasRcaSubmitted(inc)) {
+      return res.status(409).json({ error: 'Incident is not awaiting RCA approval' });
     }
-    if (!finalReviewedBy) return res.status(400).json({ error: 'closedBy required' });
+
+    const { comment } = req.body;
+    if (!comment?.trim()) return res.status(400).json({ error: 'Rejection reason required' });
+
+    const fromStatus = inc.status;
+    const updated = await Incidents.update(inc.id, {
+      status: 'Assigned',
+      isoComments: comment.trim(),
+      actionLog: appendLog(inc, {
+        id: uuidv4(), action: 'RCA Rejected',
+        fromStatus, toStatus: 'Assigned',
+        by: req.imsUser.name, byEmail: req.imsUser.email, role: req.imsUser.role,
+        comment: comment.trim(), at: new Date().toISOString(),
+      }),
+    });
+
+    email.notifyRcaRejected(updated, {
+      fromStatus,
+      toStatus: 'Assigned',
+      comment: comment.trim(),
+      rejectedBy: req.imsUser.name,
+      actorEmail: req.imsUser.email,
+    }).catch(console.error);
+
+    res.json(updated);
+  } catch (err) {
+    console.error('[Incidents] reject-rca error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// PATCH /api/incidents/:id/approve-closure — IRT approves owner closure (ends workflow)
+router.patch('/:id/approve-closure', requireIRT, async (req, res) => {
+  try {
+    const inc = await Incidents.findById(req.params.id);
+    if (!inc) return res.status(404).json({ error: 'Not found' });
+    if (inc.status !== STATUS_PENDING_CLOSURE_APPROVAL) {
+      return res.status(409).json({ error: 'Incident is not awaiting closure approval' });
+    }
 
     const updated = await Incidents.update(inc.id, {
-      closedDate, reviewDate: finalReviewDate, reviewedBy: finalReviewedBy,
-      lessonsLearned: lessonsLearned || '', status: 'Closed',
-      actionLog: [
-        ...(inc.actionLog || []),
-        {
-          id: uuidv4(), action: 'Closed',
-          fromStatus: inc.status, toStatus: 'Closed',
-          by: req.imsUser.name, byEmail: req.imsUser.email, role: req.imsUser.role,
-          comment: lessonsLearned || 'Incident marked closed', at: new Date().toISOString(),
-        },
-      ],
+      status: 'Closed',
+      actionLog: appendLog(inc, {
+        id: uuidv4(), action: 'Closure Approved',
+        fromStatus: inc.status, toStatus: 'Closed',
+        by: req.imsUser.name, byEmail: req.imsUser.email, role: req.imsUser.role,
+        comment: 'Closure approved; incident closed', at: new Date().toISOString(),
+      }),
     });
 
     email.notifyClosed(updated, {
@@ -449,46 +464,117 @@ router.patch('/:id/close', requireAuth, async (req, res) => {
 
     res.json(updated);
   } catch (err) {
+    console.error('[Incidents] approve-closure error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// PATCH /api/incidents/:id/reject-closure — IRT rejects closure (reopen for owner)
+router.patch('/:id/reject-closure', requireIRT, async (req, res) => {
+  try {
+    const inc = await Incidents.findById(req.params.id);
+    if (!inc) return res.status(404).json({ error: 'Not found' });
+    if (inc.status !== STATUS_PENDING_CLOSURE_APPROVAL) {
+      return res.status(409).json({ error: 'Incident is not awaiting closure approval' });
+    }
+
+    const { comment } = req.body;
+    if (!comment?.trim()) return res.status(400).json({ error: 'Rejection reason required' });
+
+    const fromStatus = inc.status;
+    const updated = await Incidents.update(inc.id, {
+      status: 'Admin Approved',
+      isoComments: comment.trim(),
+      closedDate: '',
+      reviewDate: '',
+      reviewedBy: '',
+      actionLog: appendLog(inc, {
+        id: uuidv4(), action: 'Closure Rejected',
+        fromStatus, toStatus: 'Admin Approved',
+        by: req.imsUser.name, byEmail: req.imsUser.email, role: req.imsUser.role,
+        comment: comment.trim(), at: new Date().toISOString(),
+      }),
+    });
+
+    email.notifyClosureRejected(updated, {
+      comment: comment.trim(),
+      rejectedBy: req.imsUser.name,
+      actorEmail: req.imsUser.email,
+    }).catch(console.error);
+
+    res.json(updated);
+  } catch (err) {
+    console.error('[Incidents] reject-closure error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// PATCH /api/incidents/:id/close — owner closes after RCA; awaits IRT RCA approval
+router.patch('/:id/close', requireAuth, async (req, res) => {
+  try {
+    const inc = await Incidents.findById(req.params.id);
+    if (!inc) return res.status(404).json({ error: 'Not found' });
+    if (inc.status !== 'Admin Approved') {
+      return res.status(409).json({ error: 'RCA must be approved before owner can close the incident' });
+    }
+
+    const normalizedUserEmail = req.imsUser.email?.toLowerCase();
+    const normalizedUserName  = req.imsUser.name?.toLowerCase();
+    const ownerEmail = inc.ownerEmail?.toLowerCase();
+    const ownerName  = inc.ownerName?.toLowerCase();
+    const isOwner = req.imsUser.id === inc.ownerId
+      || (ownerEmail && normalizedUserEmail === ownerEmail)
+      || (!inc.ownerId && ownerName && normalizedUserName === ownerName);
+    if (!isOwner) return res.status(403).json({ error: 'Only the assigned owner can close the incident at this stage' });
+
+    const { closedDate, reviewDate, reviewedBy, lessonsLearned } = req.body;
+    if (!closedDate) return res.status(400).json({ error: 'closedDate required' });
+
+    const finalReviewDate = reviewDate || closedDate;
+    const finalReviewedBy = reviewedBy || req.imsUser.name || '';
+
+    const updated = await Incidents.update(inc.id, {
+      closedDate,
+      reviewDate: finalReviewDate,
+      reviewedBy: finalReviewedBy,
+      lessonsLearned: lessonsLearned || '',
+      status: STATUS_PENDING_CLOSURE_APPROVAL,
+      actionLog: appendLog(inc, {
+        id: uuidv4(), action: 'Owner Closed',
+        fromStatus: inc.status, toStatus: STATUS_PENDING_CLOSURE_APPROVAL,
+        by: req.imsUser.name, byEmail: req.imsUser.email, role: req.imsUser.role,
+        comment: lessonsLearned || 'Owner completed closure; awaiting IRT closure approval',
+        at: new Date().toISOString(),
+      }),
+    });
+
+    email.notifyOwnerClosed(updated, { actorEmail: req.imsUser.email }).catch(console.error);
+
+    res.json(updated);
+  } catch (err) {
     console.error('[Incidents] close error:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
 
-// PATCH /api/incidents/:id/reject
+// PATCH /api/incidents/:id/reject — legacy generic reject (validation-stage incidents)
 router.patch('/:id/reject', requireIRT, async (req, res) => {
   try {
     const inc = await Incidents.findById(req.params.id);
     if (!inc) return res.status(404).json({ error: 'Not found' });
     if (inc.status === 'Rejected') return res.status(409).json({ error: 'Cannot reject a rejected incident' });
 
+    if (isPendingRcaApproval(inc.status) && hasRcaSubmitted(inc)) {
+      return res.status(409).json({ error: 'Use reject-rca for RCA rejection' });
+    }
+    if (inc.status === STATUS_PENDING_CLOSURE_APPROVAL) {
+      return res.status(409).json({ error: 'Use reject-closure for closure rejection' });
+    }
+
     const { comment } = req.body;
     if (!comment) return res.status(400).json({ error: 'Comment required' });
 
-    const fromStatus = inc.status;
-    const toStatus = getAdminRevertStatus(fromStatus);
-    const updated = await Incidents.update(inc.id, {
-      status: toStatus,
-      isoComments: comment,
-      actionLog: [
-        ...(inc.actionLog || []),
-        {
-          id: uuidv4(), action: 'Admin Reject',
-          fromStatus, toStatus,
-          by: req.imsUser.name, byEmail: req.imsUser.email, role: req.imsUser.role,
-          comment, at: new Date().toISOString(),
-        },
-      ],
-    });
-
-    email.notifyAdminReopened(updated, {
-      fromStatus,
-      toStatus,
-      comment,
-      rejectedBy: req.imsUser.name,
-      actorEmail: req.imsUser.email,
-    }).catch(console.error);
-
-    res.json(updated);
+    res.status(409).json({ error: 'Generic reject is not available for this incident status' });
   } catch (err) {
     console.error('[Incidents] reject error:', err.message);
     res.status(500).json({ error: err.message });

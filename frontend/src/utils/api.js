@@ -40,9 +40,11 @@ export const api = {
   createIncident:(data)       => request('/incidents', { method: 'POST', body: data }),
   validate:      (id, data)   => request(`/incidents/${id}/validate`, { method: 'PATCH', body: data }),
   submitClosure: (id, data)   => request(`/incidents/${id}/closure`,  { method: 'PATCH', body: data }),
-  approveIncident:(id)         => request(`/incidents/${id}/approve`,  { method: 'PATCH' }),
-  closeIncident: (id, data)   => request(`/incidents/${id}/close`,    { method: 'PATCH', body: data }),
-  rejectIncident:(id, data)   => request(`/incidents/${id}/reject`,   { method: 'PATCH', body: data }),
+  approveRca:      (id)         => request(`/incidents/${id}/approve-rca`,      { method: 'PATCH' }),
+  rejectRca:       (id, data)   => request(`/incidents/${id}/reject-rca`,       { method: 'PATCH', body: data }),
+  approveClosure:  (id)         => request(`/incidents/${id}/approve-closure`,  { method: 'PATCH' }),
+  rejectClosure:   (id, data)   => request(`/incidents/${id}/reject-closure`,   { method: 'PATCH', body: data }),
+  closeIncident:   (id, data)   => request(`/incidents/${id}/close`,            { method: 'PATCH', body: data }),
 
   // Email log
   getEmailLog:   ()           => request('/incidents/emaillog/all'),

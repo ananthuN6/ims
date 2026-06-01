@@ -15,7 +15,7 @@ import IncidentDetail from './pages/IncidentDetail';
 import ReportIncident from './pages/ReportIncident';
 import EmailLog from './pages/EmailLog';
 import Admin from './pages/Admin';
-import { hasIRTRole } from './constants';
+import { hasIRTRole, isUserAdmin } from './constants';
 
 function RequireAuth({ children }) {
   const user = useCurrentUser();
@@ -33,7 +33,7 @@ function RequireAuth({ children }) {
 
 function RequireAdmin({ children }) {
   const user = useCurrentUser();
-  if (!user?.isAdmin) return <Navigate to="/dashboard" replace />;
+  if (!isUserAdmin(user)) return <Navigate to="/dashboard" replace />;
   return children;
 }
 

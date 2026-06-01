@@ -8,9 +8,10 @@ export const STATUS_COLORS = {
   'Pending IRT Closure': { bg:'rgba(245,158,11,.15)',  text:'#fbbf24', dot:'#f59e0b' },
   'Pending ISO Closure': { bg:'rgba(245,158,11,.15)',  text:'#fbbf24', dot:'#f59e0b' },
   'Pending Admin Approval': { bg:'rgba(245,158,11,.15)',  text:'#fbbf24', dot:'#f59e0b' },
-  'Pending RCA Approval':   { bg:'rgba(245,158,11,.15)',  text:'#fbbf24', dot:'#f59e0b' },
-  'Admin Approved':      { bg:'rgba(34,197,94,.15)',   text:'#22c55e', dot:'#10b981' },
-  'RCA Approved':        { bg:'rgba(34,197,94,.15)',   text:'#22c55e', dot:'#10b981' },
+  'Pending RCA Approval':     { bg:'rgba(245,158,11,.15)',  text:'#fbbf24', dot:'#f59e0b' },
+  'RCA Approved':             { bg:'rgba(34,197,94,.15)',   text:'#22c55e', dot:'#10b981' },
+  'Pending Closure Approval': { bg:'rgba(245,158,11,.15)',  text:'#fbbf24', dot:'#f59e0b' },
+  'Admin Approved':           { bg:'rgba(34,197,94,.15)',   text:'#22c55e', dot:'#10b981' },
   Overdue:               { bg:'rgba(244,63,94,.15)',   text:'#f87171', dot:'#ef4444' },
   Closed:                { bg:'rgba(16,185,129,.15)',  text:'#34d399', dot:'#10b981' },
   Rejected:              { bg:'rgba(244,63,94,.15)',   text:'#fb7185', dot:'#f43f5e' },
@@ -26,7 +27,7 @@ export function StatusBadge({ status }) {
   const c = STATUS_COLORS[status] || STATUS_COLORS[label] || { bg:'rgba(100,116,139,.2)', text:'#94a3b8', dot:'#64748b' };
   return (
     <span style={{ display:'inline-flex', alignItems:'center', gap:6, background:c.bg, color:c.text, padding:'3px 10px', borderRadius:999, fontSize:12, fontWeight:500 }}>
-      <span style={{ width:6, height:6, borderRadius:'50%', background:c.dot, animation: ['Submitted','Pending IRT Closure','Pending ISO Closure','Pending Admin Approval','Pending RCA Approval'].includes(label) ? 'pulse-dot 1.5s ease infinite' : 'none' }} />
+      <span style={{ width:6, height:6, borderRadius:'50%', background:c.dot, animation: ['Submitted','Pending IRT Closure','Pending ISO Closure','Pending Admin Approval','Pending RCA Approval','Pending Closure Approval'].includes(label) ? 'pulse-dot 1.5s ease infinite' : 'none' }} />
       {label}
     </span>
   );

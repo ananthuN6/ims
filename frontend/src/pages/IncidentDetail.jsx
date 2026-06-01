@@ -4,16 +4,42 @@ import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useApp, useCurrentUser } from '../context/AppContext';
 import { api } from '../utils/api';
-import { hasIRTRole, displayAction } from '../constants';
+import {
+  hasIRTRole, displayAction, canOwnerClose, canReviewRca, canReviewClosure,
+  STATUS_PENDING_CLOSURE_APPROVAL, STATUS_RCA_APPROVED,
+} from '../constants';
 import { formatDate, formatDateTime, fileToBase64 } from '../utils';
-import { Card, StatusBadge, SeverityBadge, FormField, Input, Textarea, Select, Button, Toast, Spinner } from '../components/ui';
+import { StatusBadge, SeverityBadge, FormField, Input, Textarea, Select, Button, Toast, Spinner } from '../components/ui';
 import { ArrowLeft, Paperclip, X, CheckCircle, XCircle, Lock, ChevronDown, ChevronUp } from 'lucide-react';
 
-function InfoRow({ label, value, mono }) {
+function InfoRow({ label, value, mono, span }) {
   return (
-    <div style={{ display:'flex', flexDirection:'column', gap:3 }}>
-      <span style={{ fontSize:11, color:'var(--text-muted)', fontWeight:600, letterSpacing:'0.06em', textTransform:'uppercase' }}>{label}</span>
-      <span style={{ fontSize:14, color: mono?'var(--accent-blue)':'var(--text-primary)', fontFamily: mono?'var(--font-mono)':'inherit', whiteSpace:'pre-wrap', wordBreak:'break-word' }}>{value||'—'}</span>
+    <div style={{ display:'flex', flexDirection:'column', gap:2, gridColumn: span ? `span ${span}` : undefined }}>
+      <span style={{ fontSize:10, color:'var(--text-muted)', fontWeight:600, letterSpacing:'0.06em', textTransform:'uppercase' }}>{label}</span>
+      <span style={{ fontSize:13, color: mono?'var(--accent-cyan)':'var(--text-primary)', fontFamily: mono?'var(--font-mono)':'inherit', whiteSpace:'pre-wrap', wordBreak:'break-word', lineHeight:1.45 }}>{value||'—'}</span>
+    </div>
+  );
+}
+
+function MetaChip({ label, value }) {
+  return (
+    <div className="incident-meta-chip">
+      <span className="incident-meta-chip__label">{label}</span>
+      <span className="incident-meta-chip__value">{value || '—'}</span>
+    </div>
+  );
+}
+
+function Panel({ title, badge, children, style, className = '' }) {
+  return (
+    <div className={`incident-panel ${className}`.trim()} style={style}>
+      {title && (
+        <div className="incident-panel__head">
+          <span className="incident-panel__title">{title}</span>
+          {badge}
+        </div>
+      )}
+      <div className="incident-panel__body">{children}</div>
     </div>
   );
 }
@@ -31,30 +57,74 @@ function AttachmentList({ attachments=[] }) {
   );
 }
 
-const sectionToggleBtn = {
-  width:'100%', display:'flex', alignItems:'center', justifyContent:'space-between', gap:12,
-  background:'none', border:'none', padding:0, cursor:'pointer', color:'var(--text-primary)', textAlign:'left',
-};
+function WorkflowBar({ incident }) {
+  const steps = [
+    { id: 'report', label: 'Reported' },
+    { id: 'validate', label: 'Validated' },
+    { id: 'rca', label: 'RCA Review' },
+    { id: 'rcaOk', label: 'RCA Approved' },
+    { id: 'closed', label: 'Closed' },
+  ];
+  const s = incident.status;
+  let active = 0;
+  if (s === 'Rejected') active = -1;
+  else if (s === 'Submitted') active = 0;
+  else if (s === 'Assigned' || s === 'Overdue') active = incident.rca || incident.responseSubmittedAt ? 2 : 1;
+  else if (s === 'Pending Admin Approval') active = 2;
+  else if (s === STATUS_RCA_APPROVED) active = 3;
+  else if (s === STATUS_PENDING_CLOSURE_APPROVAL) active = 4;
+  else if (s === 'Closed') active = 5;
 
-function CollapsibleSection({ title, subtitle, open, onToggle, children, style, headerExtra }) {
+  if (s === 'Rejected') {
+    return (
+      <div style={{ padding:'10px 14px', borderRadius:8, background:'rgba(244,63,94,.1)', border:'1px solid rgba(244,63,94,.3)', fontSize:13, color:'#fb7185' }}>
+        Incident rejected at validation
+      </div>
+    );
+  }
+
   return (
-    <Card style={{ marginBottom:20, ...style }}>
-      <button type="button" onClick={onToggle} style={sectionToggleBtn}>
-        <div style={{ display:'flex', alignItems:'center', gap:10, flexWrap:'wrap', flex:1, minWidth:0 }}>
+    <div className="incident-workflow-bar">
+      {steps.map((step, i) => {
+        const done = active > i || (active === 5 && i < 5);
+        const isActive = active === i || (active === 4 && i === 3) || (active === 5 && i === 4);
+        return (
+          <div
+            key={step.id}
+            className={`incident-workflow-step${done ? ' incident-workflow-step--done' : ''}${isActive ? ' incident-workflow-step--active' : ''}`}
+          >
+            {step.label}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function SidebarCard({ title, children, style }) {
+  return (
+    <div className="incident-sidebar-card" style={style}>
+      {title && <h4>{title}</h4>}
+      {children}
+    </div>
+  );
+}
+
+function CollapsibleSection({ title, subtitle, open, onToggle, children, style, headerExtra, accent }) {
+  return (
+    <div className={`incident-panel incident-collapsible${accent ? ' incident-panel--accent' : ''}`} style={style}>
+      <button type="button" onClick={onToggle} className="incident-panel__head" style={{ width:'100%', border:'none', margin:0 }}>
+        <div style={{ display:'flex', alignItems:'center', gap:8, flex:1, minWidth:0 }}>
           {headerExtra}
-          <h3 style={{ fontWeight:600, fontSize:15, margin:0 }}>{title}</h3>
+          <span className="incident-panel__title">{title}</span>
           {subtitle != null && subtitle !== '' && (
-            <span style={{ fontWeight:400, fontSize:13, color:'var(--text-muted)' }}>{subtitle}</span>
+            <span style={{ fontSize:11, color:'var(--text-muted)', fontWeight:500, textTransform:'none', letterSpacing:0 }}>{subtitle}</span>
           )}
         </div>
-        {open ? <ChevronUp size={20} color="var(--text-muted)" style={{ flexShrink:0 }} /> : <ChevronDown size={20} color="var(--text-muted)" style={{ flexShrink:0 }} />}
+        {open ? <ChevronUp size={16} color="var(--text-muted)" /> : <ChevronDown size={16} color="var(--text-muted)" />}
       </button>
-      {open && (
-        <div style={{ marginTop:16, paddingTop:16, borderTop:'1px solid var(--border)' }}>
-          {children}
-        </div>
-      )}
-    </Card>
+      {open && <div className="incident-panel__body">{children}</div>}
+    </div>
   );
 }
 
@@ -82,7 +152,7 @@ export default function IncidentDetail() {
   // IRT final closure form
   const [closeForm, setCloseForm] = useState({ closedDate:new Date().toISOString().slice(0,10), reviewDate:'', reviewedBy: user?.name||'', lessonsLearned:'' });
   const [rejectComment, setRejectComment] = useState('');
-  const [showRejectForm, setShowRejectForm] = useState(false);
+  const [rejectMode, setRejectMode] = useState(null); // 'rca' | 'closure'
   const [openSections, setOpenSections] = useState({
     details: true,
     history: false,
@@ -91,15 +161,15 @@ export default function IncidentDetail() {
     ownerRca: true,
     finalClose: true,
     closed: false,
-    adminReject: false,
-    approveRca: false,
+    irtActions: false,
+    pendingClosure: false,
   });
 
   const toggleSection = (key) => setOpenSections(s => ({ ...s, [key]: !s[key] }));
 
   useEffect(() => {
-    if (showRejectForm) setOpenSections(s => ({ ...s, adminReject: true }));
-  }, [showRejectForm]);
+    if (rejectMode) setOpenSections(s => ({ ...s, irtActions: true }));
+  }, [rejectMode]);
 
   useEffect(() => {
     if (!incident) {
@@ -123,8 +193,8 @@ export default function IncidentDetail() {
     setCloseForm(f => ({ ...f, closedDate: incident.closedDate||f.closedDate, reviewDate: incident.reviewDate||f.reviewDate, reviewedBy: incident.reviewedBy||f.reviewedBy, lessonsLearned: incident.lessonsLearned||'' }));
     const isSubmitted = incident.status === 'Submitted';
     const needsOwnerRca = ['Assigned', 'Overdue'].includes(incident.status);
-    const needsFinalClose = incident.status === 'Admin Approved';
-    const needsApproveRca = ['Pending Admin Approval', 'Overdue'].includes(incident.status);
+    const needsFinalClose = canOwnerClose(incident);
+    const needsIrtActions = canReviewRca(incident) || canReviewClosure(incident);
     setOpenSections({
       details: true,
       history: false,
@@ -133,8 +203,8 @@ export default function IncidentDetail() {
       ownerRca: needsOwnerRca,
       finalClose: needsFinalClose,
       closed: incident.status === 'Closed',
-      adminReject: false,
-      approveRca: needsApproveRca,
+      irtActions: needsIrtActions,
+      pendingClosure: incident.status === STATUS_PENDING_CLOSURE_APPROVAL,
     });
   }, [incident?.id, incident?.status]);
 
@@ -171,11 +241,16 @@ export default function IncidentDetail() {
 
   const showIRTValidate   = isIRT && incident.status === 'Submitted';
   const showOwnerClosure  = (isOwner || isIRT) && ['Assigned','Overdue'].includes(incident.status);
-  const showApproveRca = isIRT && ['Pending Admin Approval','Overdue'].includes(incident.status);
-  const showOwnerClose    = isOwner && incident.status === 'Admin Approved';
-  const showIRTClose      = isIRT && incident.status === 'Admin Approved';
-  const showFinalClose    = showIRTClose || showOwnerClose;
-  const canAdminReject    = isIRT && incident.status !== 'Rejected';
+  const showOwnerClose       = isOwner && canOwnerClose(incident);
+  const showFinalClose       = showOwnerClose;
+  const showRcaReview        = isIRT && canReviewRca(incident);
+  const showClosureReview    = isIRT && canReviewClosure(incident);
+  const showPendingClosure   = incident.status === STATUS_PENDING_CLOSURE_APPROVAL && incident.closedDate;
+  const showIrtActions       = showRcaReview || showClosureReview;
+  const showValidationFacts  = incident.validationStatus && !showIRTValidate;
+  const showRcaFacts         = incident.rca && !showOwnerClosure;
+  const showOverviewFacts    = showValidationFacts || showRcaFacts || showPendingClosure
+    || (incident.status === 'Closed' && incident.closedDate);
 
   const refresh = async () => {
     const data = await api.getIncident(id);
@@ -226,48 +301,56 @@ export default function IncidentDetail() {
       lessonsLearned: closeForm.lessonsLearned || '',
     };
 
-    if (showIRTClose) {
-      if (!closeForm.reviewDate || !closeForm.reviewedBy) {
-        setToast({ message:'Review Date and Closed By are required for IRT closure', type:'error' });
-        return;
-      }
-      payload.reviewDate = closeForm.reviewDate;
-      payload.reviewedBy = closeForm.reviewedBy;
-    } else {
-      payload.reviewDate = closeForm.reviewDate || closeForm.closedDate;
-      payload.reviewedBy = closeForm.reviewedBy || user?.name || '';
-    }
+    payload.reviewDate = closeForm.reviewDate || closeForm.closedDate;
+    payload.reviewedBy = closeForm.reviewedBy || user?.name || '';
 
     setSubmitting(true);
     try {
       await api.closeIncident(id, payload);
       dispatch({ type:'ADD_NOTIF', message:`Incident ${incident.incidentId} closed` });
-      setToast({ message:'Incident closed! Reporter and owner notified by email.', type:'success' });
+      setToast({ message:'Closure submitted. IRT will approve or reject the closure.', type:'success' });
       await refresh();
     } catch(e) { setToast({ message:e.message, type:'error' }); }
     finally { setSubmitting(false); }
   };
 
-  const handleAdminReject = async () => {
-    if (!rejectComment.trim()) { setToast({ message:'Comment is required to reject', type:'error' }); return; }
+  const handleReject = async () => {
+    if (!rejectComment.trim()) { setToast({ message:'Rejection reason is required', type:'error' }); return; }
     setSubmitting(true);
     try {
-      await api.rejectIncident(id, { comment: rejectComment.trim() });
-      dispatch({ type:'ADD_NOTIF', message:`Incident ${incident.incidentId} rejected by admin` });
-      setToast({ message:'RCA rejected. Owner and relevant parties notified by email.', type:'success' });
+      if (rejectMode === 'rca') {
+        await api.rejectRca(id, { comment: rejectComment.trim() });
+        dispatch({ type:'ADD_NOTIF', message:`RCA rejected for ${incident.incidentId}` });
+        setToast({ message:'RCA rejected. Owner notified to revise and resubmit.', type:'info' });
+      } else if (rejectMode === 'closure') {
+        await api.rejectClosure(id, { comment: rejectComment.trim() });
+        dispatch({ type:'ADD_NOTIF', message:`Closure rejected for ${incident.incidentId}` });
+        setToast({ message:'Closure rejected. Owner may update and close again.', type:'info' });
+      }
       setRejectComment('');
-      setShowRejectForm(false);
+      setRejectMode(null);
       await refresh();
     } catch (e) { setToast({ message:e.message, type:'error' }); }
     finally { setSubmitting(false); }
   };
 
-  const handleApprove = async () => {
+  const handleApproveRca = async () => {
     setSubmitting(true);
     try {
-      await api.approveIncident(id);
+      await api.approveRca(id);
       dispatch({ type:'ADD_NOTIF', message:`RCA approved for ${incident.incidentId}` });
-      setToast({ message:'RCA approved. Owner or IRT may now complete final closure.', type:'success' });
+      setToast({ message:'RCA approved. Owner may now close the incident.', type:'success' });
+      await refresh();
+    } catch (e) { setToast({ message:e.message, type:'error' }); }
+    finally { setSubmitting(false); }
+  };
+
+  const handleApproveClosure = async () => {
+    setSubmitting(true);
+    try {
+      await api.approveClosure(id);
+      dispatch({ type:'ADD_NOTIF', message:`Incident ${incident.incidentId} closed` });
+      setToast({ message:'Closure approved. Incident flow is complete.', type:'success' });
       await refresh();
     } catch (e) { setToast({ message:e.message, type:'error' }); }
     finally { setSubmitting(false); }
@@ -279,103 +362,117 @@ export default function IncidentDetail() {
   };
 
   return (
-    <div className="animate-fade-up" style={{ maxWidth:800, margin:'0 auto' }}>
+    <div className="animate-fade-up incident-detail-page">
       {toast && <Toast {...toast} onClose={() => setToast(null)} />}
 
-      <button onClick={() => navigate('/incidents')} style={{ display:'flex', alignItems:'center', gap:6, background:'none', border:'none', color:'var(--text-secondary)', cursor:'pointer', fontSize:14, marginBottom:20, padding:0 }}>
+      <button onClick={() => navigate('/incidents')} style={{ display:'flex', alignItems:'center', gap:6, background:'none', border:'none', color:'var(--text-secondary)', cursor:'pointer', fontSize:14, marginBottom:16, padding:0 }}>
         <ArrowLeft size={16} /> Back to Incidents
       </button>
 
-      {/* Header */}
-      <div style={{ marginBottom:24 }}>
-        <div style={{ display:'flex', alignItems:'center', gap:12, marginBottom:6, flexWrap:'wrap' }}>
-          <span style={{ fontFamily:'var(--font-mono)', fontSize:13, color:'var(--accent-cyan)' }}>{incident.incidentId}</span>
+      <header className="incident-detail-header">
+        <div className="incident-header-row">
+          <span className="incident-header-id">{incident.incidentId}</span>
           <StatusBadge status={incident.status} />
           {incident.severity && <SeverityBadge severity={incident.severity} />}
         </div>
-        <p style={{ fontSize:13, color:'var(--text-muted)' }}>Submitted {formatDateTime(incident.createdAt)} · Updated {formatDateTime(incident.updatedAt)}</p>
-      </div>
-
-      <CollapsibleSection
-        title="Incident Details"
-        open={openSections.details}
-        onToggle={() => toggleSection('details')}
-      >
-        <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit,minmax(160px,1fr))', gap:20, marginBottom:20 }}>
-          <InfoRow label="Incident ID"   value={incident.incidentId} mono />
-          <InfoRow label="Reported By"   value={incident.reportedByName} />
-          <InfoRow label="Incident Date" value={formatDate(incident.incidentDate)} />
-          <InfoRow label="Assigned Owner" value={owner?.name} />
+        <div className="incident-meta-chips">
+          <MetaChip label="Reported by" value={incident.reportedByName} />
+          <MetaChip label="Owner" value={owner?.name || incident.ownerName} />
+          <MetaChip label="Incident date" value={formatDate(incident.incidentDate)} />
+          <MetaChip label="Updated" value={formatDateTime(incident.updatedAt).slice(0, 16)} />
         </div>
-        <FormField label="Description">
-          <div style={{ background:'var(--bg-input)', border:'1px solid var(--border)', borderRadius:8, padding:12, fontSize:14, lineHeight:1.7, minHeight:80, whiteSpace:'pre-wrap' }}>
-            {incident.description}
-          </div>
-        </FormField>
-        {incident.attachments?.length > 0 && (
-          <div style={{ marginTop:16 }}>
-            <div style={{ fontSize:11, color:'var(--text-muted)', fontWeight:600, letterSpacing:'0.06em', textTransform:'uppercase', marginBottom:8 }}>ATTACHMENTS</div>
-            <AttachmentList attachments={incident.attachments} />
-          </div>
-        )}
-      </CollapsibleSection>
+      </header>
 
-      {incident.actionLog?.length > 0 && (
-        <CollapsibleSection
-          title="Incident History"
-          subtitle={`(${incident.actionLog.length})`}
-          open={openSections.history}
-          onToggle={() => toggleSection('history')}
-          style={{ border:'1px solid rgba(148,163,184,.2)', background:'rgba(148,163,184,.04)' }}
-        >
-          <div style={{ display:'grid', gap:12 }}>
-            {[...incident.actionLog].reverse().map(entry => (
-              <div key={entry.id} style={{ padding:14, border:'1px solid rgba(148,163,184,.15)', borderRadius:10, background:'#0f172a' }}>
-                <div style={{ display:'flex', justifyContent:'space-between', gap:12, flexWrap:'wrap', marginBottom:8 }}>
-                  <span style={{ fontSize:13, color:'#cbd5e1', fontWeight:600 }}>{displayAction(entry.action)}</span>
-                  <span style={{ fontSize:12, color:'var(--text-muted)' }}>{new Date(entry.at).toLocaleString()}</span>
+      <div className="incident-detail-layout">
+        <div className="incident-detail-main">
+
+      <Panel title="Overview">
+        <div className={`incident-overview-grid${showOverviewFacts ? '' : ' incident-overview-grid--solo'}`}>
+          <div>
+            <div className="incident-field-label">Description</div>
+            <div className="incident-desc-inline">{incident.description}</div>
+            {incident.attachments?.length > 0 && (
+              <div style={{ marginTop:10 }}>
+                <div className="incident-field-label">Attachments</div>
+                <AttachmentList attachments={incident.attachments} />
+              </div>
+            )}
+          </div>
+          <div className="incident-facts-stack">
+            {showValidationFacts && (
+              <div className={`incident-subpanel${incident.validationStatus === 'Valid' ? ' incident-subpanel--valid' : ''}`}>
+                <div className="incident-subpanel__head">
+                  <span className="incident-subpanel__title">IRT validation</span>
+                  {incident.validationStatus === 'Valid'
+                    ? <CheckCircle size={14} color="var(--accent-emerald)" />
+                    : <XCircle size={14} color="var(--accent-rose)" />}
                 </div>
-                <div style={{ fontSize:13, color:'var(--text-secondary)', marginBottom:6 }}>{entry.role?.toUpperCase() || 'SYSTEM'} by {entry.by || entry.byEmail}</div>
-                <div style={{ fontSize:14, color:'var(--text-primary)', whiteSpace:'pre-wrap' }}>{entry.comment || 'No comment provided.'}</div>
-                <div style={{ marginTop:6, fontSize:12, color:'var(--text-muted)' }}>
-                  {entry.fromStatus ? `${entry.fromStatus} → ${entry.toStatus}` : `Status: ${entry.toStatus}`}
+                <div className="incident-info-grid">
+                  <InfoRow label="Result" value={incident.validationStatus} />
+                  <InfoRow label="Severity" value={incident.severity} />
+                  <InfoRow label="IRT comments" value={incident.isoComments} span={2} />
                 </div>
               </div>
-            ))}
+            )}
+            {showRcaFacts && (
+              <div className="incident-subpanel">
+                <div className="incident-subpanel__head">
+                  <span className="incident-subpanel__title">Owner RCA</span>
+                  <Lock size={12} color="var(--text-muted)" />
+                </div>
+                <div className="incident-info-grid">
+                  <InfoRow label="RCA" value={incident.rca} span={2} />
+                  <InfoRow label="Correction" value={incident.correction} />
+                  <InfoRow label="Corrective action" value={incident.correctiveAction} />
+                  <InfoRow label="Target date" value={formatDate(incident.targetDate)} />
+                </div>
+                {incident.closureAttachments?.length > 0 && (
+                  <div style={{ marginTop:8 }}>
+                    <AttachmentList attachments={incident.closureAttachments} />
+                  </div>
+                )}
+              </div>
+            )}
+            {showPendingClosure && (
+              <div className="incident-subpanel incident-subpanel--warn">
+                <div className="incident-subpanel__head">
+                  <span className="incident-subpanel__title">Closure pending approval</span>
+                </div>
+                <div className="incident-info-grid">
+                  <InfoRow label="Closed" value={formatDate(incident.closedDate)} />
+                  <InfoRow label="Closed by" value={incident.reviewedBy} />
+                  <InfoRow label="Lessons" value={incident.lessonsLearned} span={2} />
+                </div>
+              </div>
+            )}
+            {incident.status === 'Closed' && incident.closedDate && (
+              <div className="incident-subpanel incident-subpanel--valid">
+                <div className="incident-subpanel__head">
+                  <span className="incident-subpanel__title">Incident closed</span>
+                  <CheckCircle size={14} color="#10b981" />
+                </div>
+                <div className="incident-info-grid">
+                  <InfoRow label="Closed" value={formatDate(incident.closedDate)} />
+                  <InfoRow label="Closed by" value={incident.reviewedBy} />
+                  <InfoRow label="Lessons" value={incident.lessonsLearned} span={2} />
+                </div>
+              </div>
+            )}
           </div>
-        </CollapsibleSection>
-      )}
+        </div>
+      </Panel>
 
-      {/* ── 2. IRT Validation (read-only once done) ── */}
-      {incident.validationStatus && !showIRTValidate && (
-        <CollapsibleSection
-          title="IRT Validation"
-          subtitle={incident.validationStatus}
-          open={openSections.validationDone}
-          onToggle={() => toggleSection('validationDone')}
-          style={{ border:`1px solid ${incident.validationStatus==='Valid'?'rgba(16,185,129,.2)':'rgba(244,63,94,.2)'}` }}
-          headerExtra={incident.validationStatus==='Valid' ? <CheckCircle size={18} color="var(--accent-emerald)" /> : <XCircle size={18} color="var(--accent-rose)" />}
-        >
-          <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit,minmax(160px,1fr))', gap:16 }}>
-            <InfoRow label="Validation"  value={incident.validationStatus} />
-            <InfoRow label="Severity"    value={incident.severity} />
-            <InfoRow label="IRT Comments" value={incident.isoComments} />
-          </div>
-        </CollapsibleSection>
-      )}
-
-      {/* ── 2. IRT Validation Form (active) ── */}
+      <div className="incident-forms-split">
       {showIRTValidate && (
         <CollapsibleSection
-          title="🛡️ IRT Validation"
-          subtitle="Review required"
+          title="IRT validation — action required"
           open={openSections.validationForm}
           onToggle={() => toggleSection('validationForm')}
-          style={{ border:'1px solid rgba(59,130,246,.25)' }}
+          accent
         >
-          <p style={{ fontSize:13, color:'var(--text-secondary)', marginBottom:20, marginTop:0 }}>Review and mark this incident as valid or invalid.</p>
+          <p style={{ fontSize:12, color:'var(--text-secondary)', margin:'0 0 12px' }}>Mark valid or invalid and assign an owner.</p>
           <div style={{ display:'flex', flexDirection:'column', gap:16 }}>
-            <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:16 }}>
+            <div className="incident-form-grid-2">
               <FormField label="Validation Status" required>
                 <Select value={isoForm.validationStatus} onChange={e => setIsoForm(f => ({ ...f, validationStatus:e.target.value }))}>
                   <option value="">Select…</option>
@@ -451,28 +548,31 @@ export default function IncidentDetail() {
         </CollapsibleSection>
       )}
 
-      {(incident.rca || showOwnerClosure) && (
+      {showOwnerClosure && (
         <CollapsibleSection
-          title="📝 Owner RCA"
-          subtitle={showOwnerClosure ? 'Action required' : 'Submitted'}
+          title="Owner RCA — submit"
           open={openSections.ownerRca}
           onToggle={() => toggleSection('ownerRca')}
-          headerExtra={!showOwnerClosure ? <Lock size={14} color="var(--text-muted)" /> : null}
+          accent
         >
           {showOwnerClosure ? (
             <form onSubmit={handleOwnerSubmit} style={{ display:'flex', flexDirection:'column', gap:16 }}>
               <FormField label="Root Cause Analysis (RCA)" required>
                 <Textarea rows={4} value={ownerForm.rca} onChange={e => setOwnerForm(f => ({ ...f, rca:e.target.value }))} placeholder="Describe the root cause…" />
               </FormField>
-              <FormField label="Correction" required>
-                <Textarea rows={3} value={ownerForm.correction} onChange={e => setOwnerForm(f => ({ ...f, correction:e.target.value }))} placeholder="Immediate corrective action taken…" />
-              </FormField>
-              <FormField label="Corrective Action" required>
-                <Textarea rows={3} value={ownerForm.correctiveAction} onChange={e => setOwnerForm(f => ({ ...f, correctiveAction:e.target.value }))} placeholder="Long-term corrective measures…" />
-              </FormField>
+              <div className="incident-form-grid-2">
+                <FormField label="Correction" required>
+                  <Textarea rows={3} value={ownerForm.correction} onChange={e => setOwnerForm(f => ({ ...f, correction:e.target.value }))} placeholder="Immediate corrective action taken…" />
+                </FormField>
+                <FormField label="Corrective Action" required>
+                  <Textarea rows={3} value={ownerForm.correctiveAction} onChange={e => setOwnerForm(f => ({ ...f, correctiveAction:e.target.value }))} placeholder="Long-term corrective measures…" />
+                </FormField>
+              </div>
+              <div className="incident-form-grid-3">
               <FormField label="Target Date">
                 <Input type="date" value={ownerForm.targetDate} onChange={e => setOwnerForm(f => ({ ...f, targetDate:e.target.value }))} />
               </FormField>
+              </div>
               <FormField label="Closure Evidence">
                 <div>
                   <label style={{ display:'inline-flex', alignItems:'center', gap:8, background:'rgba(255,255,255,.05)', border:'1px dashed var(--border)', borderRadius:8, padding:'8px 14px', cursor:'pointer', fontSize:13, color:'var(--text-secondary)' }}
@@ -497,170 +597,138 @@ export default function IncidentDetail() {
               </FormField>
               <div><Button type="submit" variant="success" disabled={submitting}>{submitting ? 'Submitting…' : 'Submit RCA'}</Button></div>
             </form>
-          ) : (
-            <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit,minmax(200px,1fr))', gap:16 }}>
-              <InfoRow label="RCA"               value={incident.rca} />
-              <InfoRow label="Correction"        value={incident.correction} />
-              <InfoRow label="Corrective Action" value={incident.correctiveAction} />
-              <InfoRow label="Target Date"       value={formatDate(incident.targetDate)} />
-              {incident.closureAttachments?.length > 0 && (
-                <div style={{ gridColumn:'1/-1' }}>
-                  <div style={{ fontSize:11, color:'var(--text-muted)', fontWeight:600, letterSpacing:'0.06em', textTransform:'uppercase', marginBottom:8 }}>CLOSURE EVIDENCE</div>
-                  <AttachmentList attachments={incident.closureAttachments} />
-                </div>
-              )}
-            </div>
-          )}
+          ) : null}
         </CollapsibleSection>
       )}
 
       {showFinalClose && (
         <CollapsibleSection
-          title={showIRTClose ? '✅ Final IRT Closure' : '✅ Close Incident'}
+          title="Close incident"
           open={openSections.finalClose}
           onToggle={() => toggleSection('finalClose')}
-          style={{ border:'1px solid rgba(16,185,129,.25)' }}
+          accent
         >
-          <p style={{ fontSize:13, color:'var(--text-secondary)', marginBottom:20, marginTop:0 }}>
-            {showIRTClose ? 'Review the closure details and officially close the incident.' : 'Confirm the closure date and complete the incident.'}
+          <p style={{ fontSize:12, color:'var(--text-secondary)', margin:'0 0 12px' }}>
+            Submit closure for IRT approval.
           </p>
-          <div style={{ display:'flex', flexDirection:'column', gap:16 }}>
-            <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit,minmax(180px,1fr))', gap:16 }}>
+          <div style={{ display:'flex', flexDirection:'column', gap:12 }}>
+            <div className="incident-form-grid-3">
               <FormField label="Closed Date" required>
                 <Input type="date" value={closeForm.closedDate} onChange={e => setCloseForm(f => ({ ...f, closedDate:e.target.value }))} />
               </FormField>
-              <FormField label="Review Date" required={showIRTClose}>
+              <FormField label="Review Date">
                 <Input type="date" value={closeForm.reviewDate} onChange={e => setCloseForm(f => ({ ...f, reviewDate:e.target.value }))} />
-                {showOwnerClose && <small style={{ color:'var(--text-muted)', display:'block', marginTop:6 }}>Optional for owner closure; defaults to closed date.</small>}
               </FormField>
-              <FormField label="Closed By" required={showIRTClose}>
-                <Input value={closeForm.reviewedBy} onChange={e => setCloseForm(f => ({ ...f, reviewedBy:e.target.value }))} placeholder="Name of person closing" />
-                {showOwnerClose && <small style={{ color:'var(--text-muted)', display:'block', marginTop:6 }}>Optional for owner closure; defaults to your name.</small>}
+              <FormField label="Closed By">
+                <Input value={closeForm.reviewedBy} onChange={e => setCloseForm(f => ({ ...f, reviewedBy:e.target.value }))} placeholder="Name" />
               </FormField>
             </div>
-            {/* Lessons Learned moved here to IRT section */}
-            <FormField label="Lessons Learned" hint="IRT's documented lessons and recommendations from this incident.">
-              <Textarea rows={4} value={closeForm.lessonsLearned} onChange={e => setCloseForm(f => ({ ...f, lessonsLearned:e.target.value }))} placeholder="What lessons can be drawn? What should be done differently?…" />
+            <FormField label="Lessons Learned">
+              <Textarea rows={3} value={closeForm.lessonsLearned} onChange={e => setCloseForm(f => ({ ...f, lessonsLearned:e.target.value }))} placeholder="Optional…" />
             </FormField>
             <div>
               <Button variant="success" onClick={handleFinalClose} disabled={submitting}>
-                {submitting ? 'Closing…' : '🔒 Close Incident'}
+                {submitting ? 'Closing…' : 'Close incident'}
               </Button>
             </div>
           </div>
         </CollapsibleSection>
       )}
+      </div>
 
-      {incident.status === 'Closed' && incident.closedDate && (
-        <CollapsibleSection
-          title="Incident Closed"
-          open={openSections.closed}
-          onToggle={() => toggleSection('closed')}
-          style={{ border:'1px solid rgba(16,185,129,.2)', background:'rgba(16,185,129,.04)' }}
-          headerExtra={<CheckCircle size={18} color="#10b981" />}
-        >
-          <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit,minmax(160px,1fr))', gap:16 }}>
-            <InfoRow label="Closed Date"     value={formatDate(incident.closedDate)} />
-            <InfoRow label="Review Date"     value={formatDate(incident.reviewDate)} />
-            <InfoRow label="Closed By"       value={incident.reviewedBy} />
-            <InfoRow label="Lessons Learned" value={incident.lessonsLearned} />
-          </div>
-        </CollapsibleSection>
-      )}
-
-      {showApproveRca && (
-        <CollapsibleSection
-          title="✅ Approve RCA"
-          open={openSections.approveRca}
-          onToggle={() => toggleSection('approveRca')}
-          style={{ marginTop:28, border:'1px solid rgba(34,197,94,.25)', background:'rgba(34,197,94,.04)' }}
-        >
-          <p style={{ fontSize:13, color:'var(--text-secondary)', marginTop:0, marginBottom:16 }}>
-            Review the submitted RCA. After approval, the owner or IRT will complete final incident closure.
-          </p>
-          <Button variant="success" onClick={handleApprove} disabled={submitting}>
-            {submitting ? 'Approving…' : 'Approve RCA'}
-          </Button>
-        </CollapsibleSection>
-      )}
-
-      {isIRT && incident.status !== 'Rejected' && (
-        <div style={{ marginTop:28, paddingTop:24, borderTop:'1px solid var(--border)' }}>
-          <CollapsibleSection
-            title="IRT Actions"
-            open={openSections.adminReject}
-            onToggle={() => toggleSection('adminReject')}
-            style={{ border:'1px solid var(--border)' }}
-          >
-            {showRejectForm && (
-              <div style={{ marginBottom:16, padding:16, border:'1px solid rgba(244,63,94,.25)', borderRadius:8, background:'rgba(254,226,226,.35)' }}>
-                <h4 style={{ fontWeight:600, fontSize:14, marginBottom:10 }}>Admin Reject & Reopen</h4>
-                <p style={{ fontSize:13, color:'var(--text-secondary)', marginBottom:16 }}>Provide a reason to reject and reopen this incident to the prior stage.</p>
-                <FormField label="Rejection Comment" required>
-                  <Textarea
-                    value={rejectComment}
-                    onChange={e => setRejectComment(e.target.value)}
-                    rows={4}
-                    placeholder="Enter a comment for the action log and notification"
-                  />
-                </FormField>
-                <div style={{ display:'flex', gap:10, marginTop:12 }}>
-                  <button
-                    type="button"
-                    onClick={handleAdminReject}
-                    disabled={submitting}
-                    style={{
-                      border:'none',
-                      background:'var(--accent-rose)',
-                      color:'#fff',
-                      borderRadius:8,
-                      padding:'10px 16px',
-                      cursor:'pointer',
-                      fontWeight:600,
-                    }}
-                  >
-                    Reject Incident
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setShowRejectForm(false)}
-                    style={{
-                      border:'1px solid var(--border)',
-                      background:'var(--bg-card)',
-                      color:'var(--text-primary)',
-                      borderRadius:8,
-                      padding:'10px 16px',
-                      cursor:'pointer',
-                      fontWeight:600,
-                    }}
-                  >
-                    Close
-                  </button>
-                </div>
-              </div>
-            )}
-            <div style={{ display:'flex', gap:10, flexWrap:'wrap', justifyContent:'flex-end' }}>
-            {canAdminReject && (
-              <button
-                type="button"
-                onClick={() => setShowRejectForm(prev => !prev)}
-                style={{
-                  border:'1px solid var(--border)',
-                  background:'var(--bg-card)',
-                  color:'var(--text-primary)',
-                  borderRadius:8,
-                  padding:'10px 16px',
-                  cursor:'pointer',
-                  fontWeight:600,
-                }}
-              >
-                {showRejectForm ? 'Cancel Reject' : 'Admin Reject & Reopen'}
-              </button>
-            )}
-            </div>
-          </CollapsibleSection>
         </div>
-      )}
+
+        <aside className="incident-detail-sidebar">
+          <SidebarCard title="Workflow">
+            <WorkflowBar incident={incident} />
+          </SidebarCard>
+
+          {showIrtActions && (
+            <SidebarCard title="IRT Actions" style={{ borderColor: 'rgba(59,130,246,.35)' }}>
+              {showRcaReview && (
+                <p style={{ fontSize:13, color:'var(--text-secondary)', margin:'0 0 14px', lineHeight:1.5 }}>
+                  Approve or reject the submitted RCA.
+                </p>
+              )}
+              {showClosureReview && (
+                <p style={{ fontSize:13, color:'var(--text-secondary)', margin:'0 0 14px', lineHeight:1.5 }}>
+                  Approve closure to complete the incident, or reject to reopen for the owner.
+                </p>
+              )}
+              {rejectMode && (
+                <div style={{ marginBottom:14, padding:14, border:'1px solid rgba(244,63,94,.3)', borderRadius:8, background:'rgba(244,63,94,.06)' }}>
+                  <div style={{ fontWeight:600, fontSize:13, marginBottom:10, color:'#fb7185' }}>
+                    {rejectMode === 'rca' ? 'Reject RCA' : 'Reject Closure'}
+                  </div>
+                  <FormField label="Reason" required>
+                    <Textarea
+                      value={rejectComment}
+                      onChange={e => setRejectComment(e.target.value)}
+                      rows={3}
+                      placeholder="Reason for rejection…"
+                    />
+                  </FormField>
+                  <div style={{ display:'flex', gap:8, marginTop:10, flexWrap:'wrap' }}>
+                    <button type="button" className="incident-btn-reject" onClick={handleReject} disabled={submitting} style={{ background:'var(--accent-rose)', color:'#fff', border:'none' }}>
+                      Confirm
+                    </button>
+                    <button type="button" onClick={() => { setRejectMode(null); setRejectComment(''); }} style={{ border:'1px solid var(--border)', background:'transparent', color:'var(--text-secondary)', borderRadius:8, padding:'10px 14px', cursor:'pointer', fontSize:13 }}>
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              )}
+              <div className="incident-actions-bar">
+                {showRcaReview && !rejectMode && (
+                  <>
+                    <button type="button" className="incident-btn-approve" onClick={handleApproveRca} disabled={submitting}>
+                      {submitting ? '…' : 'Approve RCA'}
+                    </button>
+                    <button type="button" className="incident-btn-reject" onClick={() => setRejectMode('rca')}>
+                      Reject RCA
+                    </button>
+                  </>
+                )}
+                {showClosureReview && !rejectMode && (
+                  <>
+                    <button type="button" className="incident-btn-approve" onClick={handleApproveClosure} disabled={submitting}>
+                      {submitting ? '…' : 'Approve Closure'}
+                    </button>
+                    <button type="button" className="incident-btn-reject" onClick={() => setRejectMode('closure')}>
+                      Reject Closure
+                    </button>
+                  </>
+                )}
+              </div>
+            </SidebarCard>
+          )}
+
+          {incident.status === STATUS_RCA_APPROVED && !incident.closedDate && isOwner && (
+            <SidebarCard style={{ borderColor: 'rgba(6,182,212,.35)', background: 'rgba(6,182,212,.06)' }}>
+              <p style={{ fontSize:13, color:'var(--accent-cyan)', margin:0, lineHeight:1.5 }}>
+                RCA approved — complete <strong>Close Incident</strong> in the main panel.
+              </p>
+            </SidebarCard>
+          )}
+
+          {incident.actionLog?.length > 0 && (
+            <SidebarCard title={`History (${incident.actionLog.length})`}>
+              <div style={{ maxHeight: 360, overflowY: 'auto', paddingRight: 4 }}>
+                {[...incident.actionLog].reverse().map(entry => (
+                  <div key={entry.id} className="incident-history-item">
+                    <div style={{ display:'flex', justifyContent:'space-between', gap:8, marginBottom:6 }}>
+                      <span style={{ fontSize:12, fontWeight:600, color:'var(--text-primary)' }}>{displayAction(entry.action)}</span>
+                      <span style={{ fontSize:11, color:'var(--text-muted)', whiteSpace:'nowrap' }}>{new Date(entry.at).toLocaleDateString()}</span>
+                    </div>
+                    <div style={{ fontSize:11, color:'var(--text-muted)', marginBottom:4 }}>{entry.by || entry.byEmail}</div>
+                    <div style={{ fontSize:12, color:'var(--text-secondary)', lineHeight:1.45 }}>{entry.comment || '—'}</div>
+                  </div>
+                ))}
+              </div>
+            </SidebarCard>
+          )}
+        </aside>
+      </div>
     </div>
   );
 }

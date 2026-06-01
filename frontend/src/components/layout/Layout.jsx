@@ -3,7 +3,7 @@ import React, { useState } from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
 import { useMsal } from '@azure/msal-react';
 import { useApp, useCurrentUser, useMyNotifs } from '../../context/AppContext';
-import { hasIRTRole } from '../../constants';
+import { hasIRTRole, isUserAdmin } from '../../constants';
 import { LayoutDashboard, FilePlus, ListChecks, Bell, LogOut, ShieldCheck, X, Menu, Mail, Users } from 'lucide-react';
 
 function NavItem({ to, icon: Icon, label, badge }) {
@@ -42,7 +42,7 @@ export default function Layout({ children }) {
   };
 
   const isIRT   = hasIRTRole(user);
-  const isAdmin = user?.isAdmin;
+  const isAdmin = isUserAdmin(user);
 
   const nav = [
     { to:'/dashboard',  icon:LayoutDashboard, label:'Dashboard' },
@@ -145,7 +145,7 @@ export default function Layout({ children }) {
           </div>
         </header>
 
-        <main style={{ flex:1, padding:'28px 24px', maxWidth:1100, width:'100%', margin:'0 auto' }}>
+        <main style={{ flex:1, padding:'24px 28px', width:'100%', maxWidth:'100%' }}>
           {children}
         </main>
       </div>
