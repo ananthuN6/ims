@@ -4,9 +4,10 @@ import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useApp, useCurrentUser } from '../context/AppContext';
 import { api } from '../utils/api';
+import { hasIRTRole, displayAction } from '../constants';
 import { formatDate, formatDateTime, fileToBase64 } from '../utils';
 import { Card, StatusBadge, SeverityBadge, FormField, Input, Textarea, Select, Button, Toast, Spinner } from '../components/ui';
-import { ArrowLeft, Paperclip, X, CheckCircle, XCircle, Lock } from 'lucide-react';
+import { ArrowLeft, Paperclip, X, CheckCircle, XCircle, Lock, ChevronDown, ChevronUp } from 'lucide-react';
 
 function InfoRow({ label, value, mono }) {
   return (
@@ -30,6 +31,33 @@ function AttachmentList({ attachments=[] }) {
   );
 }
 
+const sectionToggleBtn = {
+  width:'100%', display:'flex', alignItems:'center', justifyContent:'space-between', gap:12,
+  background:'none', border:'none', padding:0, cursor:'pointer', color:'var(--text-primary)', textAlign:'left',
+};
+
+function CollapsibleSection({ title, subtitle, open, onToggle, children, style, headerExtra }) {
+  return (
+    <Card style={{ marginBottom:20, ...style }}>
+      <button type="button" onClick={onToggle} style={sectionToggleBtn}>
+        <div style={{ display:'flex', alignItems:'center', gap:10, flexWrap:'wrap', flex:1, minWidth:0 }}>
+          {headerExtra}
+          <h3 style={{ fontWeight:600, fontSize:15, margin:0 }}>{title}</h3>
+          {subtitle != null && subtitle !== '' && (
+            <span style={{ fontWeight:400, fontSize:13, color:'var(--text-muted)' }}>{subtitle}</span>
+          )}
+        </div>
+        {open ? <ChevronUp size={20} color="var(--text-muted)" style={{ flexShrink:0 }} /> : <ChevronDown size={20} color="var(--text-muted)" style={{ flexShrink:0 }} />}
+      </button>
+      {open && (
+        <div style={{ marginTop:16, paddingTop:16, borderTop:'1px solid var(--border)' }}>
+          {children}
+        </div>
+      )}
+    </Card>
+  );
+}
+
 export default function IncidentDetail() {
   const { id } = useParams();
   const { state, dispatch, loadIncidents, loadUsers } = useApp();
@@ -42,7 +70,7 @@ export default function IncidentDetail() {
   const [submitting, setSubmitting] = useState(false);
   const [orgUsers, setOrgUsers] = useState([]);
 
-  // ISO Validation form
+  // IRT Validation form
   const [isoForm, setIsoForm] = useState({ validationStatus:'', severity:'', ownerEmail:'', ownerName:'', isoComments:'' });
   const [ownerSearch, setOwnerSearch] = useState('');
   const [ownerDropdownOpen, setOwnerDropdownOpen] = useState(false);
@@ -51,10 +79,27 @@ export default function IncidentDetail() {
   const [ownerForm, setOwnerForm] = useState({ rca:'', correction:'', correctiveAction:'', targetDate:'' });
   const [closureAtts, setClosureAtts] = useState([]);
 
-  // ISO final closure form
+  // IRT final closure form
   const [closeForm, setCloseForm] = useState({ closedDate:new Date().toISOString().slice(0,10), reviewDate:'', reviewedBy: user?.name||'', lessonsLearned:'' });
   const [rejectComment, setRejectComment] = useState('');
   const [showRejectForm, setShowRejectForm] = useState(false);
+  const [openSections, setOpenSections] = useState({
+    details: true,
+    history: false,
+    validationDone: false,
+    validationForm: true,
+    ownerRca: true,
+    finalClose: true,
+    closed: false,
+    adminReject: false,
+    approveRca: false,
+  });
+
+  const toggleSection = (key) => setOpenSections(s => ({ ...s, [key]: !s[key] }));
+
+  useEffect(() => {
+    if (showRejectForm) setOpenSections(s => ({ ...s, adminReject: true }));
+  }, [showRejectForm]);
 
   useEffect(() => {
     if (!incident) {
@@ -76,13 +121,27 @@ export default function IncidentDetail() {
     setIsoForm({ validationStatus: incident.validationStatus||'', severity: incident.severity||'', ownerEmail:'', ownerName:'', isoComments: incident.isoComments||'' });
     setOwnerForm({ rca: incident.rca||'', correction: incident.correction||'', correctiveAction: incident.correctiveAction||'', targetDate: incident.targetDate||'' });
     setCloseForm(f => ({ ...f, closedDate: incident.closedDate||f.closedDate, reviewDate: incident.reviewDate||f.reviewDate, reviewedBy: incident.reviewedBy||f.reviewedBy, lessonsLearned: incident.lessonsLearned||'' }));
-  }, [incident]);
+    const isSubmitted = incident.status === 'Submitted';
+    const needsOwnerRca = ['Assigned', 'Overdue'].includes(incident.status);
+    const needsFinalClose = incident.status === 'Admin Approved';
+    const needsApproveRca = ['Pending Admin Approval', 'Overdue'].includes(incident.status);
+    setOpenSections({
+      details: true,
+      history: false,
+      validationDone: false,
+      validationForm: isSubmitted,
+      ownerRca: needsOwnerRca,
+      finalClose: needsFinalClose,
+      closed: incident.status === 'Closed',
+      adminReject: false,
+      approveRca: needsApproveRca,
+    });
+  }, [incident?.id, incident?.status]);
 
   if (loading) return <div style={{ display:'flex', justifyContent:'center', padding:80 }}><Spinner size={32} /></div>;
   if (!incident) return <div style={{ textAlign:'center', padding:80, color:'var(--text-muted)' }}>Incident not found</div>;
 
-  const isISO   = user?.role === 'iso';
-  const isAdmin = user?.isAdmin;
+  const isIRT   = hasIRTRole(user);
   const normalizedUserEmail = user?.email?.toLowerCase();
   const normalizedUserName  = user?.name?.toLowerCase();
   const ownerEmail = incident.ownerEmail?.toLowerCase();
@@ -110,13 +169,13 @@ export default function IncidentDetail() {
     return ownerSearchTokens.every(token => text.includes(token));
   });
 
-  const showISOValidate   = isISO && incident.status === 'Submitted';
-  const showOwnerClosure  = (isOwner || isISO) && ['Assigned','Overdue'].includes(incident.status);
-  const showApprovalButton = (isISO || isAdmin) && ['Pending Admin Approval','Overdue'].includes(incident.status);
+  const showIRTValidate   = isIRT && incident.status === 'Submitted';
+  const showOwnerClosure  = (isOwner || isIRT) && ['Assigned','Overdue'].includes(incident.status);
+  const showApproveRca = isIRT && ['Pending Admin Approval','Overdue'].includes(incident.status);
   const showOwnerClose    = isOwner && incident.status === 'Admin Approved';
-  const showISOClose      = isISO && incident.status === 'Admin Approved';
-  const showFinalClose    = showISOClose || showOwnerClose;
-  const canAdminReject    = (isISO || isAdmin) && incident.status !== 'Rejected';
+  const showIRTClose      = isIRT && incident.status === 'Admin Approved';
+  const showFinalClose    = showIRTClose || showOwnerClose;
+  const canAdminReject    = isIRT && incident.status !== 'Rejected';
 
   const refresh = async () => {
     const data = await api.getIncident(id);
@@ -152,8 +211,8 @@ export default function IncidentDetail() {
     setSubmitting(true);
     try {
       await api.submitClosure(id, { ...ownerForm, closureAttachments: closureAtts });
-      dispatch({ type:'ADD_NOTIF', message:`Closure details submitted for ${incident.incidentId}` });
-      setToast({ message:'Closure submitted! ISO Team notified by email.', type:'success' });
+      dispatch({ type:'ADD_NOTIF', message:`RCA submitted for ${incident.incidentId}` });
+      setToast({ message:'RCA submitted! IRT notified by email.', type:'success' });
       await refresh();
     } catch(e) { setToast({ message:e.message, type:'error' }); }
     finally { setSubmitting(false); }
@@ -167,9 +226,9 @@ export default function IncidentDetail() {
       lessonsLearned: closeForm.lessonsLearned || '',
     };
 
-    if (showISOClose) {
+    if (showIRTClose) {
       if (!closeForm.reviewDate || !closeForm.reviewedBy) {
-        setToast({ message:'Review Date and Reviewed By are required for ISO closure', type:'error' });
+        setToast({ message:'Review Date and Closed By are required for IRT closure', type:'error' });
         return;
       }
       payload.reviewDate = closeForm.reviewDate;
@@ -195,7 +254,7 @@ export default function IncidentDetail() {
     try {
       await api.rejectIncident(id, { comment: rejectComment.trim() });
       dispatch({ type:'ADD_NOTIF', message:`Incident ${incident.incidentId} rejected by admin` });
-      setToast({ message:'Incident rejected and reopened to prior stage.', type:'success' });
+      setToast({ message:'RCA rejected. Owner and relevant parties notified by email.', type:'success' });
       setRejectComment('');
       setShowRejectForm(false);
       await refresh();
@@ -207,8 +266,8 @@ export default function IncidentDetail() {
     setSubmitting(true);
     try {
       await api.approveIncident(id);
-      dispatch({ type:'ADD_NOTIF', message:`Incident ${incident.incidentId} approved for closure` });
-      setToast({ message:'Incident approved. Final close may now proceed.', type:'success' });
+      dispatch({ type:'ADD_NOTIF', message:`RCA approved for ${incident.incidentId}` });
+      setToast({ message:'RCA approved. Owner or IRT may now complete final closure.', type:'success' });
       await refresh();
     } catch (e) { setToast({ message:e.message, type:'error' }); }
     finally { setSubmitting(false); }
@@ -228,105 +287,20 @@ export default function IncidentDetail() {
       </button>
 
       {/* Header */}
-      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:24, flexWrap:'wrap', gap:12 }}>
-        <div>
-          <div style={{ display:'flex', alignItems:'center', gap:12, marginBottom:6, flexWrap:'wrap' }}>
-            <span style={{ fontFamily:'var(--font-mono)', fontSize:13, color:'var(--accent-cyan)' }}>{incident.incidentId}</span>
-            <StatusBadge status={incident.status} />
-            {incident.severity && <SeverityBadge severity={incident.severity} />}
-          </div>
-          <p style={{ fontSize:13, color:'var(--text-muted)' }}>Submitted {formatDateTime(incident.createdAt)} · Updated {formatDateTime(incident.updatedAt)}</p>
+      <div style={{ marginBottom:24 }}>
+        <div style={{ display:'flex', alignItems:'center', gap:12, marginBottom:6, flexWrap:'wrap' }}>
+          <span style={{ fontFamily:'var(--font-mono)', fontSize:13, color:'var(--accent-cyan)' }}>{incident.incidentId}</span>
+          <StatusBadge status={incident.status} />
+          {incident.severity && <SeverityBadge severity={incident.severity} />}
         </div>
-        {(isISO || isAdmin) && incident.status !== 'Rejected' && (
-          <div style={{ display:'flex', gap:10, flexWrap:'wrap', alignItems:'center' }}>
-            {showApprovalButton && (
-              <button
-                type="button"
-                onClick={handleApprove}
-                disabled={submitting}
-                style={{
-                  border:'1px solid var(--border)',
-                  background:'var(--bg-card)',
-                  color:'var(--text-primary)',
-                  borderRadius:8,
-                  padding:'10px 16px',
-                  cursor:'pointer',
-                  fontWeight:600,
-                }}
-              >
-                Approve for Closure
-              </button>
-            )}
-            <button
-              type="button"
-              onClick={() => setShowRejectForm(prev => !prev)}
-              style={{
-                border:'1px solid var(--border)',
-                background:'var(--bg-card)',
-                color:'var(--text-primary)',
-                borderRadius:8,
-                padding:'10px 16px',
-                cursor:'pointer',
-                fontWeight:600,
-              }}
-            >
-              {showRejectForm ? 'Cancel Reject' : 'Admin Reject & Reopen'}
-            </button>
-          </div>
-        )}
+        <p style={{ fontSize:13, color:'var(--text-muted)' }}>Submitted {formatDateTime(incident.createdAt)} · Updated {formatDateTime(incident.updatedAt)}</p>
       </div>
 
-      {showRejectForm && (
-        <Card style={{ marginBottom:20, border:'1px solid rgba(244,63,94,.25)', background:'rgba(254,226,226,.35)' }}>
-          <h3 style={{ fontWeight:600, fontSize:15, marginBottom:10 }}>Admin Reject & Reopen</h3>
-          <p style={{ fontSize:13, color:'var(--text-secondary)', marginBottom:16 }}>Provide a reason to reject and reopen this incident to the prior stage.</p>
-          <FormField label="Rejection Comment" required>
-            <Textarea
-              value={rejectComment}
-              onChange={e => setRejectComment(e.target.value)}
-              rows={4}
-              placeholder="Enter a comment for the action log and notification"
-            />
-          </FormField>
-          <div style={{ display:'flex', gap:10, marginTop:12 }}>
-            <button
-              type="button"
-              onClick={handleAdminReject}
-              disabled={submitting}
-              style={{
-                border:'none',
-                background:'var(--accent-rose)',
-                color:'#fff',
-                borderRadius:8,
-                padding:'10px 16px',
-                cursor:'pointer',
-                fontWeight:600,
-              }}
-            >
-              Reject Incident
-            </button>
-            <button
-              type="button"
-              onClick={() => setShowRejectForm(false)}
-              style={{
-                border:'1px solid var(--border)',
-                background:'var(--bg-card)',
-                color:'var(--text-primary)',
-                borderRadius:8,
-                padding:'10px 16px',
-                cursor:'pointer',
-                fontWeight:600,
-              }}
-            >
-              Close
-            </button>
-          </div>
-        </Card>
-      )}
-
-      {/* ── 1. Incident Info ── */}
-      <Card style={{ marginBottom:20 }}>
-        <h3 style={{ fontWeight:600, marginBottom:16, fontSize:15 }}>Incident Details</h3>
+      <CollapsibleSection
+        title="Incident Details"
+        open={openSections.details}
+        onToggle={() => toggleSection('details')}
+      >
         <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit,minmax(160px,1fr))', gap:20, marginBottom:20 }}>
           <InfoRow label="Incident ID"   value={incident.incidentId} mono />
           <InfoRow label="Reported By"   value={incident.reportedByName} />
@@ -344,16 +318,21 @@ export default function IncidentDetail() {
             <AttachmentList attachments={incident.attachments} />
           </div>
         )}
-      </Card>
+      </CollapsibleSection>
 
       {incident.actionLog?.length > 0 && (
-        <Card style={{ marginBottom:20, border:'1px solid rgba(148,163,184,.2)', background:'rgba(148,163,184,.04)' }}>
-          <h3 style={{ fontWeight:600, fontSize:15, marginBottom:12 }}>Incident History</h3>
+        <CollapsibleSection
+          title="Incident History"
+          subtitle={`(${incident.actionLog.length})`}
+          open={openSections.history}
+          onToggle={() => toggleSection('history')}
+          style={{ border:'1px solid rgba(148,163,184,.2)', background:'rgba(148,163,184,.04)' }}
+        >
           <div style={{ display:'grid', gap:12 }}>
             {[...incident.actionLog].reverse().map(entry => (
               <div key={entry.id} style={{ padding:14, border:'1px solid rgba(148,163,184,.15)', borderRadius:10, background:'#0f172a' }}>
                 <div style={{ display:'flex', justifyContent:'space-between', gap:12, flexWrap:'wrap', marginBottom:8 }}>
-                  <span style={{ fontSize:13, color:'#cbd5e1', fontWeight:600 }}>{entry.action}</span>
+                  <span style={{ fontSize:13, color:'#cbd5e1', fontWeight:600 }}>{displayAction(entry.action)}</span>
                   <span style={{ fontSize:12, color:'var(--text-muted)' }}>{new Date(entry.at).toLocaleString()}</span>
                 </div>
                 <div style={{ fontSize:13, color:'var(--text-secondary)', marginBottom:6 }}>{entry.role?.toUpperCase() || 'SYSTEM'} by {entry.by || entry.byEmail}</div>
@@ -364,30 +343,37 @@ export default function IncidentDetail() {
               </div>
             ))}
           </div>
-        </Card>
+        </CollapsibleSection>
       )}
 
-      {/* ── 2. ISO Validation (read-only once done) ── */}
-      {incident.validationStatus && !showISOValidate && (
-        <Card style={{ marginBottom:20, border:`1px solid ${incident.validationStatus==='Valid'?'rgba(16,185,129,.2)':'rgba(244,63,94,.2)'}` }}>
-          <div style={{ display:'flex', alignItems:'center', gap:10, marginBottom:16 }}>
-            {incident.validationStatus==='Valid' ? <CheckCircle size={18} color="var(--accent-emerald)" /> : <XCircle size={18} color="var(--accent-rose)" />}
-            <h3 style={{ fontWeight:600, fontSize:15 }}>ISO Validation</h3>
-            <span style={{ fontSize:12, color: incident.validationStatus==='Valid'?'#34d399':'#fb7185' }}>{incident.validationStatus}</span>
-          </div>
+      {/* ── 2. IRT Validation (read-only once done) ── */}
+      {incident.validationStatus && !showIRTValidate && (
+        <CollapsibleSection
+          title="IRT Validation"
+          subtitle={incident.validationStatus}
+          open={openSections.validationDone}
+          onToggle={() => toggleSection('validationDone')}
+          style={{ border:`1px solid ${incident.validationStatus==='Valid'?'rgba(16,185,129,.2)':'rgba(244,63,94,.2)'}` }}
+          headerExtra={incident.validationStatus==='Valid' ? <CheckCircle size={18} color="var(--accent-emerald)" /> : <XCircle size={18} color="var(--accent-rose)" />}
+        >
           <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit,minmax(160px,1fr))', gap:16 }}>
             <InfoRow label="Validation"  value={incident.validationStatus} />
             <InfoRow label="Severity"    value={incident.severity} />
-            <InfoRow label="ISO Comments" value={incident.isoComments} />
+            <InfoRow label="IRT Comments" value={incident.isoComments} />
           </div>
-        </Card>
+        </CollapsibleSection>
       )}
 
-      {/* ── 2. ISO Validation Form (active) ── */}
-      {showISOValidate && (
-        <Card style={{ marginBottom:20, border:'1px solid rgba(59,130,246,.25)' }}>
-          <h3 style={{ fontWeight:600, fontSize:15, marginBottom:6 }}>🛡️ ISO Validation</h3>
-          <p style={{ fontSize:13, color:'var(--text-secondary)', marginBottom:20 }}>Review and mark this incident as valid or invalid.</p>
+      {/* ── 2. IRT Validation Form (active) ── */}
+      {showIRTValidate && (
+        <CollapsibleSection
+          title="🛡️ IRT Validation"
+          subtitle="Review required"
+          open={openSections.validationForm}
+          onToggle={() => toggleSection('validationForm')}
+          style={{ border:'1px solid rgba(59,130,246,.25)' }}
+        >
+          <p style={{ fontSize:13, color:'var(--text-secondary)', marginBottom:20, marginTop:0 }}>Review and mark this incident as valid or invalid.</p>
           <div style={{ display:'flex', flexDirection:'column', gap:16 }}>
             <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:16 }}>
               <FormField label="Validation Status" required>
@@ -453,7 +439,7 @@ export default function IncidentDetail() {
                 </div>
               </FormField>
             )}
-            <FormField label="ISO Comments">
+            <FormField label="IRT Comments">
               <Textarea rows={3} value={isoForm.isoComments} onChange={e => setIsoForm(f => ({ ...f, isoComments:e.target.value }))} placeholder="Add notes or comments…" />
             </FormField>
             <div>
@@ -462,17 +448,17 @@ export default function IncidentDetail() {
               </Button>
             </div>
           </div>
-        </Card>
+        </CollapsibleSection>
       )}
 
-      {/* ── 3. Owner Closure (read-only if already submitted) ── */}
       {(incident.rca || showOwnerClosure) && (
-        <Card style={{ marginBottom:20 }}>
-          <div style={{ display:'flex', alignItems:'center', gap:10, marginBottom:16 }}>
-            <h3 style={{ fontWeight:600, fontSize:15 }}>📝 Owner Closure Details</h3>
-            {!showOwnerClosure && <Lock size={14} color="var(--text-muted)" />}
-          </div>
-
+        <CollapsibleSection
+          title="📝 Owner RCA"
+          subtitle={showOwnerClosure ? 'Action required' : 'Submitted'}
+          open={openSections.ownerRca}
+          onToggle={() => toggleSection('ownerRca')}
+          headerExtra={!showOwnerClosure ? <Lock size={14} color="var(--text-muted)" /> : null}
+        >
           {showOwnerClosure ? (
             <form onSubmit={handleOwnerSubmit} style={{ display:'flex', flexDirection:'column', gap:16 }}>
               <FormField label="Root Cause Analysis (RCA)" required>
@@ -509,7 +495,7 @@ export default function IncidentDetail() {
                   {incident.closureAttachments?.length > 0 && <div style={{ marginTop:10 }}><AttachmentList attachments={incident.closureAttachments} /></div>}
                 </div>
               </FormField>
-              <div><Button type="submit" variant="success" disabled={submitting}>{submitting ? 'Submitting…' : 'Submit Closure Details'}</Button></div>
+              <div><Button type="submit" variant="success" disabled={submitting}>{submitting ? 'Submitting…' : 'Submit RCA'}</Button></div>
             </form>
           ) : (
             <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit,minmax(200px,1fr))', gap:16 }}>
@@ -525,33 +511,35 @@ export default function IncidentDetail() {
               )}
             </div>
           )}
-        </Card>
+        </CollapsibleSection>
       )}
 
-      {/* ── 4. Final Closure Form (active) ── */}
-      {/* NOTE: Lessons Learned is now in this ISO section, not owner section */}
       {showFinalClose && (
-        <Card style={{ marginBottom:20, border:'1px solid rgba(16,185,129,.25)' }}>
-          <h3 style={{ fontWeight:600, fontSize:15, marginBottom:6 }}>{showISOClose ? '✅ Final ISO Closure' : '✅ Close Incident'}</h3>
-          <p style={{ fontSize:13, color:'var(--text-secondary)', marginBottom:20 }}>
-            {showISOClose ? 'Review the closure details and officially close the incident.' : 'Confirm the closure date and complete the incident.'}
+        <CollapsibleSection
+          title={showIRTClose ? '✅ Final IRT Closure' : '✅ Close Incident'}
+          open={openSections.finalClose}
+          onToggle={() => toggleSection('finalClose')}
+          style={{ border:'1px solid rgba(16,185,129,.25)' }}
+        >
+          <p style={{ fontSize:13, color:'var(--text-secondary)', marginBottom:20, marginTop:0 }}>
+            {showIRTClose ? 'Review the closure details and officially close the incident.' : 'Confirm the closure date and complete the incident.'}
           </p>
           <div style={{ display:'flex', flexDirection:'column', gap:16 }}>
             <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit,minmax(180px,1fr))', gap:16 }}>
               <FormField label="Closed Date" required>
                 <Input type="date" value={closeForm.closedDate} onChange={e => setCloseForm(f => ({ ...f, closedDate:e.target.value }))} />
               </FormField>
-              <FormField label="Review Date" required={showISOClose}>
+              <FormField label="Review Date" required={showIRTClose}>
                 <Input type="date" value={closeForm.reviewDate} onChange={e => setCloseForm(f => ({ ...f, reviewDate:e.target.value }))} />
                 {showOwnerClose && <small style={{ color:'var(--text-muted)', display:'block', marginTop:6 }}>Optional for owner closure; defaults to closed date.</small>}
               </FormField>
-              <FormField label="Reviewed By" required={showISOClose}>
-                <Input value={closeForm.reviewedBy} onChange={e => setCloseForm(f => ({ ...f, reviewedBy:e.target.value }))} placeholder="Reviewer name" />
+              <FormField label="Closed By" required={showIRTClose}>
+                <Input value={closeForm.reviewedBy} onChange={e => setCloseForm(f => ({ ...f, reviewedBy:e.target.value }))} placeholder="Name of person closing" />
                 {showOwnerClose && <small style={{ color:'var(--text-muted)', display:'block', marginTop:6 }}>Optional for owner closure; defaults to your name.</small>}
               </FormField>
             </div>
-            {/* Lessons Learned moved here to ISO section */}
-            <FormField label="Lessons Learned" hint="ISO Team's documented lessons and recommendations from this incident.">
+            {/* Lessons Learned moved here to IRT section */}
+            <FormField label="Lessons Learned" hint="IRT's documented lessons and recommendations from this incident.">
               <Textarea rows={4} value={closeForm.lessonsLearned} onChange={e => setCloseForm(f => ({ ...f, lessonsLearned:e.target.value }))} placeholder="What lessons can be drawn? What should be done differently?…" />
             </FormField>
             <div>
@@ -560,23 +548,118 @@ export default function IncidentDetail() {
               </Button>
             </div>
           </div>
-        </Card>
+        </CollapsibleSection>
       )}
 
-      {/* ── 4. Final Closure Info (read-only, status = Closed) ── */}
       {incident.status === 'Closed' && incident.closedDate && (
-        <Card style={{ border:'1px solid rgba(16,185,129,.2)', background:'rgba(16,185,129,.04)' }}>
-          <div style={{ display:'flex', alignItems:'center', gap:10, marginBottom:16 }}>
-            <CheckCircle size={18} color="#10b981" />
-            <h3 style={{ fontWeight:600, fontSize:15, color:'#34d399' }}>Incident Closed</h3>
-          </div>
+        <CollapsibleSection
+          title="Incident Closed"
+          open={openSections.closed}
+          onToggle={() => toggleSection('closed')}
+          style={{ border:'1px solid rgba(16,185,129,.2)', background:'rgba(16,185,129,.04)' }}
+          headerExtra={<CheckCircle size={18} color="#10b981" />}
+        >
           <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit,minmax(160px,1fr))', gap:16 }}>
             <InfoRow label="Closed Date"     value={formatDate(incident.closedDate)} />
             <InfoRow label="Review Date"     value={formatDate(incident.reviewDate)} />
-            <InfoRow label="Reviewed By"     value={incident.reviewedBy} />
+            <InfoRow label="Closed By"       value={incident.reviewedBy} />
             <InfoRow label="Lessons Learned" value={incident.lessonsLearned} />
           </div>
-        </Card>
+        </CollapsibleSection>
+      )}
+
+      {showApproveRca && (
+        <CollapsibleSection
+          title="✅ Approve RCA"
+          open={openSections.approveRca}
+          onToggle={() => toggleSection('approveRca')}
+          style={{ marginTop:28, border:'1px solid rgba(34,197,94,.25)', background:'rgba(34,197,94,.04)' }}
+        >
+          <p style={{ fontSize:13, color:'var(--text-secondary)', marginTop:0, marginBottom:16 }}>
+            Review the submitted RCA. After approval, the owner or IRT will complete final incident closure.
+          </p>
+          <Button variant="success" onClick={handleApprove} disabled={submitting}>
+            {submitting ? 'Approving…' : 'Approve RCA'}
+          </Button>
+        </CollapsibleSection>
+      )}
+
+      {isIRT && incident.status !== 'Rejected' && (
+        <div style={{ marginTop:28, paddingTop:24, borderTop:'1px solid var(--border)' }}>
+          <CollapsibleSection
+            title="IRT Actions"
+            open={openSections.adminReject}
+            onToggle={() => toggleSection('adminReject')}
+            style={{ border:'1px solid var(--border)' }}
+          >
+            {showRejectForm && (
+              <div style={{ marginBottom:16, padding:16, border:'1px solid rgba(244,63,94,.25)', borderRadius:8, background:'rgba(254,226,226,.35)' }}>
+                <h4 style={{ fontWeight:600, fontSize:14, marginBottom:10 }}>Admin Reject & Reopen</h4>
+                <p style={{ fontSize:13, color:'var(--text-secondary)', marginBottom:16 }}>Provide a reason to reject and reopen this incident to the prior stage.</p>
+                <FormField label="Rejection Comment" required>
+                  <Textarea
+                    value={rejectComment}
+                    onChange={e => setRejectComment(e.target.value)}
+                    rows={4}
+                    placeholder="Enter a comment for the action log and notification"
+                  />
+                </FormField>
+                <div style={{ display:'flex', gap:10, marginTop:12 }}>
+                  <button
+                    type="button"
+                    onClick={handleAdminReject}
+                    disabled={submitting}
+                    style={{
+                      border:'none',
+                      background:'var(--accent-rose)',
+                      color:'#fff',
+                      borderRadius:8,
+                      padding:'10px 16px',
+                      cursor:'pointer',
+                      fontWeight:600,
+                    }}
+                  >
+                    Reject Incident
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setShowRejectForm(false)}
+                    style={{
+                      border:'1px solid var(--border)',
+                      background:'var(--bg-card)',
+                      color:'var(--text-primary)',
+                      borderRadius:8,
+                      padding:'10px 16px',
+                      cursor:'pointer',
+                      fontWeight:600,
+                    }}
+                  >
+                    Close
+                  </button>
+                </div>
+              </div>
+            )}
+            <div style={{ display:'flex', gap:10, flexWrap:'wrap', justifyContent:'flex-end' }}>
+            {canAdminReject && (
+              <button
+                type="button"
+                onClick={() => setShowRejectForm(prev => !prev)}
+                style={{
+                  border:'1px solid var(--border)',
+                  background:'var(--bg-card)',
+                  color:'var(--text-primary)',
+                  borderRadius:8,
+                  padding:'10px 16px',
+                  cursor:'pointer',
+                  fontWeight:600,
+                }}
+              >
+                {showRejectForm ? 'Cancel Reject' : 'Admin Reject & Reopen'}
+              </button>
+            )}
+            </div>
+          </CollapsibleSection>
+        </div>
       )}
     </div>
   );

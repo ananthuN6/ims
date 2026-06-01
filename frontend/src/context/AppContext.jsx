@@ -6,6 +6,7 @@ const Ctx = createContext(null);
 
 const INIT = {
   currentUser:   null,
+  authChecking:  true,   // true until MSAL session restore finishes
   users:         [],
   incidents:     [],
   emailLog:      [],
@@ -24,7 +25,8 @@ function addNotif(state, message, forUserId) {
 
 function reducer(state, action) {
   switch (action.type) {
-    case 'SET_USER':      return { ...state, currentUser: action.user, error: null };
+    case 'SET_USER':      return { ...state, currentUser: action.user, authChecking: false, error: null };
+    case 'SET_AUTH_CHECKING': return { ...state, authChecking: action.v };
     case 'SET_LOADING':   return { ...state, loading: action.v };
     case 'SET_ERROR':     return { ...state, error: action.msg, loading: false };
     case 'CLEAR_ERROR':   return { ...state, error: null };
@@ -45,7 +47,7 @@ function reducer(state, action) {
     case 'MARK_ALL_READ':
       return { ...state, notifications: state.notifications.map(n => ({ ...n, read: true })) };
     case 'LOGOUT':
-      return { ...INIT };
+      return { ...INIT, authChecking: false };
     default: return state;
   }
 }
@@ -56,6 +58,10 @@ export function AppProvider({ children }) {
   const setUser = useCallback((user) => {
     if (user) setApiUser(user.email);
     dispatch({ type: 'SET_USER', user });
+  }, []);
+
+  const setAuthChecking = useCallback((v) => {
+    dispatch({ type: 'SET_AUTH_CHECKING', v });
   }, []);
 
   const logout = useCallback(() => {
@@ -92,7 +98,7 @@ export function AppProvider({ children }) {
   }, [state.currentUser, loadUsers]);
 
   return (
-    <Ctx.Provider value={{ state, dispatch, setUser, logout, loadIncidents, loadUsers, loadEmailLog }}>
+    <Ctx.Provider value={{ state, dispatch, setUser, setAuthChecking, logout, loadIncidents, loadUsers, loadEmailLog }}>
       {children}
     </Ctx.Provider>
   );

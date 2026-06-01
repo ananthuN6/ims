@@ -1,4 +1,5 @@
 // backend/server.js
+require('dotenv').config({ path: require('path').join(__dirname, '.env') });
 require('isomorphic-fetch');
 const express = require('express');
 const cors    = require('cors');
@@ -23,5 +24,5 @@ const PORT = cfg.server.port || 4000;
 app.listen(PORT, () => {
   console.log(`\n🛡️  IMS Backend running on http://localhost:${PORT}`);
   console.log(`   Frontend expected at: ${cfg.server.frontendUrl}`);
-  console.log(`   Admin ISO account:    ${cfg.admin.email}\n`);
+  console.log(`   Admin IRT account:    ${cfg.admin.email}\n`);
 });

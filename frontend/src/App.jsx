@@ -1,10 +1,12 @@
 /* eslint-disable no-unused-vars */
 // frontend/src/App.jsx
-import React, { useEffect, useState } from 'react';
+import React from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { MsalProvider } from '@azure/msal-react';
 import { msalInstance } from './auth/msalConfig';
-import { AppProvider, useCurrentUser } from './context/AppContext';
+import { AppProvider, useApp, useCurrentUser } from './context/AppContext';
+import AuthRestore from './auth/AuthRestore';
+import { Spinner } from './components/ui';
 import Layout from './components/layout/Layout';
 import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
@@ -13,9 +15,18 @@ import IncidentDetail from './pages/IncidentDetail';
 import ReportIncident from './pages/ReportIncident';
 import EmailLog from './pages/EmailLog';
 import Admin from './pages/Admin';
+import { hasIRTRole } from './constants';
 
 function RequireAuth({ children }) {
   const user = useCurrentUser();
+  const { state } = useApp();
+  if (state.authChecking) {
+    return (
+      <div style={{ display:'flex', justifyContent:'center', alignItems:'center', minHeight:'100vh' }}>
+        <Spinner size={32} />
+      </div>
+    );
+  }
   if (!user) return <Navigate to="/login" replace />;
   return <Layout>{children}</Layout>;
 }
@@ -26,15 +37,15 @@ function RequireAdmin({ children }) {
   return children;
 }
 
-function RequireIso({ children }) {
+function RequireIRT({ children }) {
   const user = useCurrentUser();
-  if (!user || (user.role !== 'iso' && !user.isAdmin)) return <Navigate to="/dashboard" replace />;
+  if (!hasIRTRole(user)) return <Navigate to="/dashboard" replace />;
   return children;
 }
 
 function RequireEmployee({ children }) {
   const user = useCurrentUser();
-  // ISO can access everything; only block non-ISO from ISO-only pages
+  // IRT can access everything; only block non-IRT from IRT-only pages
   return children;
 }
 
@@ -47,7 +58,7 @@ function AppContent() {
         <Route path="/incidents" element={<RequireAuth><Incidents /></RequireAuth>} />
         <Route path="/incidents/:id" element={<RequireAuth><IncidentDetail /></RequireAuth>} />
         <Route path="/report"   element={<RequireAuth><ReportIncident /></RequireAuth>} />
-        <Route path="/email-log" element={<RequireAuth><RequireIso><EmailLog /></RequireIso></RequireAuth>} />
+        <Route path="/email-log" element={<RequireAuth><RequireIRT><EmailLog /></RequireIRT></RequireAuth>} />
         <Route path="/admin"    element={<RequireAuth><RequireAdmin><Admin /></RequireAdmin></RequireAuth>} />
         <Route path="*"         element={<Navigate to="/dashboard" replace />} />
       </Routes>
@@ -55,26 +66,11 @@ function AppContent() {
   );
 }
 
-export default function App() {
-  const [msal, setMsal] = useState(null);
-
-  useEffect(() => {
-    // Initialize MSAL and handle any pending redirect responses
-    msalInstance.handleRedirectPromise()
-      .then(() => {
-        setMsal(msalInstance);
-      })
-      .catch(err => {
-        console.error('[MSAL] Redirect promise error:', err);
-        setMsal(msalInstance);  // Continue anyway
-      });
-  }, []);
-
-  if (!msal) return null;  // Wait for MSAL to initialize
-
+export default function App({ instance = msalInstance }) {
   return (
-    <MsalProvider instance={msal}>
+    <MsalProvider instance={instance}>
       <AppProvider>
+        <AuthRestore />
         <AppContent />
       </AppProvider>
     </MsalProvider>

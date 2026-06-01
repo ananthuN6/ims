@@ -1,6 +1,7 @@
 // frontend/src/utils/index.js
 import * as XLSX from 'xlsx';
 import { format, parseISO } from 'date-fns';
+import { hasIRTRole } from '../constants';
 
 export const formatDate = (d) => { if (!d) return '—'; try { return format(parseISO(d), 'dd MMM yyyy'); } catch { return d; } };
 export const formatDateTime = (d) => { if (!d) return '—'; try { return format(parseISO(d), 'dd MMM yyyy, HH:mm'); } catch { return d; } };
@@ -22,7 +23,7 @@ export const exportToExcel = (incidents, users) => {
     'Status':             i.status,
     'Severity':           i.severity || '—',
     'Owner':              i.ownerId ? name(i.ownerId) : (i.ownerName || '—'),
-    'ISO Comments':       i.isoComments || '—',
+    'IRT Comments':       i.isoComments || '—',
     'RCA':                i.rca || '—',
     'Correction':         i.correction || '—',
     'Corrective Action':  i.correctiveAction || '—',
@@ -30,7 +31,7 @@ export const exportToExcel = (incidents, users) => {
     'Lessons Learned':    i.lessonsLearned || '—',
     'Closed Date':        formatDate(i.closedDate),
     'Review Date':        formatDate(i.reviewDate),
-    'Reviewed By':        i.reviewedBy || '—',
+    'Closed By':          i.reviewedBy || '—',
     'Created At':         formatDateTime(i.createdAt),
     'Updated At':         formatDateTime(i.updatedAt),
   }));
@@ -41,8 +42,11 @@ export const exportToExcel = (incidents, users) => {
   XLSX.writeFile(wb, `incidents_${format(new Date(),'yyyyMMdd_HHmm')}.xlsx`);
 };
 
+export const isRejectedIncident = (inc) =>
+  inc.status === 'Rejected' || inc.validationStatus === 'Invalid';
+
 export const getVisibleIncidents = (incidents, user) => {
   if (!user) return [];
-  if (user.role === 'iso') return incidents;
+  if (hasIRTRole(user)) return incidents;
   return incidents.filter(i => i.reportedBy === user.id || i.ownerId === user.id);
 };

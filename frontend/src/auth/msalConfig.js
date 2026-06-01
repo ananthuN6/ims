@@ -12,7 +12,7 @@ export const msalConfig = {
     navigateToLoginRequestUrl: false,  // Don't navigate after token refresh
   },
   cache: {
-    cacheLocation:       'sessionStorage',
+    cacheLocation: 'localStorage',
     storeAuthStateInCookie: false,
   },
   system: {

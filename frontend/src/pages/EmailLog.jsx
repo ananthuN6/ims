@@ -4,15 +4,21 @@ import React, { useEffect, useState } from 'react';
 import { useCurrentUser } from '../context/AppContext';
 import { api } from '../utils/api';
 import { formatDateTime } from '../utils';
+import { hasIRTRole } from '../constants';
 import { EmptyState, Card, Spinner } from '../components/ui';
 import { Mail } from 'lucide-react';
 
 const TYPE_META = {
-  submitted:        { label:'Incident Submitted',    color:'#60a5fa' },
-  assigned:         { label:'Incident Assigned',     color:'#a78bfa' },
-  rejected:         { label:'Incident Rejected',     color:'#fb7185' },
-  closure_submitted:{ label:'Closure Submitted',     color:'#fbbf24' },
-  closed:           { label:'Incident Closed',       color:'#34d399' },
+  submitted:          { label:'Incident Submitted',    color:'#60a5fa' },
+  assigned:           { label:'Incident Assigned',     color:'#a78bfa' },
+  rejected:           { label:'Incident Rejected',     color:'#fb7185' },
+  admin_reopened:     { label:'Incident Reopened',     color:'#fb7185' },
+  rca_rejected:       { label:'RCA Rejected',          color:'#fb7185' },
+  closure_submitted:  { label:'RCA Submitted',         color:'#fbbf24' },
+  admin_approved:     { label:'RCA Approved',          color:'#34d399' },
+  closed:             { label:'Incident Closed',       color:'#34d399' },
+  overdue:            { label:'Incident Overdue',      color:'#f97316' },
+  response_reminder:  { label:'RCA Response Reminder', color:'#f97316' },
 };
 
 export default function EmailLog() {
@@ -26,7 +32,7 @@ export default function EmailLog() {
       .catch(() => setLoading(false));
   }, []);
 
-  if (user?.role !== 'iso') return null;
+  if (!hasIRTRole(user)) return null;
 
   return (
     <div className="animate-fade-up">

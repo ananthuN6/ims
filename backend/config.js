@@ -11,7 +11,7 @@ module.exports = {
   },
   admin: {
     email: process.env.ADMIN_EMAIL || '',
-    name:  process.env.ADMIN_NAME  || 'Admin ISO',
+    name:  process.env.ADMIN_NAME  || 'Admin IRT',
   },
   db: {
   dir:       './db',

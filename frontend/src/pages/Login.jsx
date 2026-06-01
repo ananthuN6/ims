@@ -11,13 +11,15 @@ import { Spinner } from '../components/ui';
 
 export default function Login() {
   const { instance } = useMsal();
-  const { setUser } = useApp();
+  const { setUser, state } = useApp();
   const user = useCurrentUser();
   const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
   const [error, setError]   = useState('');
 
-  useEffect(() => { if (user) navigate('/dashboard'); }, [user, navigate]);
+  useEffect(() => {
+    if (!state.authChecking && user) navigate('/dashboard', { replace: true });
+  }, [user, state.authChecking, navigate]);
 
   const handleLogin = async () => {
     setLoading(true);
@@ -35,7 +37,7 @@ export default function Login() {
       const msg = err.message || 'Sign-in failed';
       // Friendly message for users not in the system
       if (msg.includes('Access denied') || msg.includes('not been added')) {
-        setError('Your account has not been added to IMS. Please contact your ISO Administrator.');
+        setError('Your account has not been added to IMS. Please contact your IRT Administrator.');
       } else if (msg.toLowerCase().includes('cancelled') || msg.toLowerCase().includes('user_cancelled')) {
         setError('');  // user closed popup
       } else {
@@ -45,6 +47,14 @@ export default function Login() {
       setLoading(false);
     }
   };
+
+  if (state.authChecking) {
+    return (
+      <div style={{ minHeight:'100vh', display:'flex', alignItems:'center', justifyContent:'center', background:'var(--bg-primary)' }}>
+        <Spinner size={32} />
+      </div>
+    );
+  }
 
   return (
     <div style={{
@@ -95,7 +105,7 @@ export default function Login() {
 
           <p style={{ marginTop:20, fontSize:12, color:'var(--text-muted)', textAlign:'center', lineHeight:1.6 }}>
             Access is restricted to registered IMS users.<br />
-            Contact your ISO Administrator to request access.
+            Contact your IRT Administrator to request access.
           </p>
         </div>
       </div>

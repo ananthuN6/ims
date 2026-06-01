@@ -35,6 +35,7 @@ export const api = {
 
   // Incidents
   getIncidents:  ()           => request('/incidents'),
+  getNextIncidentId: ()        => request('/incidents/next-id'),
   getIncident:   (id)         => request(`/incidents/${id}`),
   createIncident:(data)       => request('/incidents', { method: 'POST', body: data }),
   validate:      (id, data)   => request(`/incidents/${id}/validate`, { method: 'PATCH', body: data }),

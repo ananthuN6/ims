@@ -3,6 +3,7 @@ import React, { useState } from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
 import { useMsal } from '@azure/msal-react';
 import { useApp, useCurrentUser, useMyNotifs } from '../../context/AppContext';
+import { hasIRTRole } from '../../constants';
 import { LayoutDashboard, FilePlus, ListChecks, Bell, LogOut, ShieldCheck, X, Menu, Mail, Users } from 'lucide-react';
 
 function NavItem({ to, icon: Icon, label, badge }) {
@@ -40,14 +41,14 @@ export default function Layout({ children }) {
     navigate('/login');
   };
 
-  const isISO   = user?.role === 'iso';
+  const isIRT   = hasIRTRole(user);
   const isAdmin = user?.isAdmin;
 
   const nav = [
     { to:'/dashboard',  icon:LayoutDashboard, label:'Dashboard' },
     { to:'/report', icon:FilePlus, label:'Report Incident' },
     { to:'/incidents',  icon:ListChecks, label:'Incidents' },
-    ...((isISO || isAdmin) ? [{ to:'/email-log', icon:Mail,  label:'Email Log' }] : []),
+    ...(isIRT ? [{ to:'/email-log', icon:Mail,  label:'Email Log' }] : []),
     ...(isAdmin ? [{ to:'/admin',    icon:Users, label:'User Admin' }] : []),
   ];
 
@@ -79,8 +80,8 @@ export default function Layout({ children }) {
           </div>
           <div style={{ flex:1, minWidth:0 }}>
             <div style={{ fontSize:13, fontWeight:600, color:'var(--text-primary)', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{user?.name}</div>
-            <div style={{ fontSize:11, color: isAdmin ? '#fbbf24' : isISO ? 'var(--accent-cyan)' : 'var(--text-muted)' }}>
-              {isAdmin ? '⭐ Admin ISO' : isISO ? 'ISO Team' : 'Employee'}
+            <div style={{ fontSize:11, color: isAdmin ? '#fbbf24' : isIRT ? 'var(--accent-cyan)' : 'var(--text-muted)' }}>
+              {isAdmin ? '⭐ Admin IRT' : isIRT ? 'IRT' : 'Employee'}
             </div>
           </div>
           <button onClick={handleLogout} title="Sign out" style={{ background:'none', border:'none', cursor:'pointer', color:'var(--text-muted)', display:'flex', padding:4 }}>

@@ -3,7 +3,8 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useApp, useCurrentUser } from '../context/AppContext';
-import { getVisibleIncidents, exportToExcel, formatDate } from '../utils';
+import { getVisibleIncidents, isRejectedIncident, exportToExcel, formatDate } from '../utils';
+import { hasIRTRole, INCIDENT_STATUSES } from '../constants';
 import { StatusBadge, SeverityBadge, Button, EmptyState, Spinner } from '../components/ui';
 import { Search, FileDown } from 'lucide-react';
 
@@ -11,7 +12,7 @@ export default function Incidents() {
   const { state, loadIncidents } = useApp();
   const user = useCurrentUser();
   const navigate = useNavigate();
-  const isISO = user?.role === 'iso';
+  const isIRT = hasIRTRole(user);
 
   useEffect(() => { loadIncidents(); }, []);
 
@@ -26,7 +27,11 @@ export default function Incidents() {
     .filter(inc => {
       const q = search.toLowerCase();
       if (q && !inc.incidentId.toLowerCase().includes(q) && !inc.description.toLowerCase().includes(q) && !inc.reportedByName.toLowerCase().includes(q)) return false;
-      if (filterStatus && inc.status !== filterStatus) return false;
+      if (filterStatus === 'Rejected') {
+        if (!isRejectedIncident(inc)) return false;
+      } else if (filterStatus === 'Pending IRT Closure') {
+        if (inc.status !== 'Pending IRT Closure' && inc.status !== 'Pending ISO Closure') return false;
+      } else if (filterStatus && inc.status !== filterStatus) return false;
       if (filterSeverity && inc.severity !== filterSeverity) return false;
       return true;
     })
@@ -42,12 +47,9 @@ export default function Incidents() {
 
   return (
     <div className="animate-fade-up">
-      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:24, flexWrap:'wrap', gap:16 }}>
-        <div>
-          <h1 style={{ fontSize:22, fontWeight:700, letterSpacing:'-0.02em' }}>Incidents</h1>
-          <p style={{ color:'var(--text-secondary)', fontSize:14, marginTop:2 }}>{filtered.length} of {all.length} incident{all.length!==1?'s':''}</p>
-        </div>
-        {isISO && <Button variant="secondary" onClick={() => exportToExcel(all, state.users)} icon={<FileDown size={15} />}>Export Excel</Button>}
+      <div style={{ marginBottom:24 }}>
+        <h1 style={{ fontSize:22, fontWeight:700, letterSpacing:'-0.02em' }}>Incidents</h1>
+        <p style={{ color:'var(--text-secondary)', fontSize:14, marginTop:2 }}>{filtered.length} of {all.length} incident{all.length!==1?'s':''}</p>
       </div>
 
       {/* Filters */}
@@ -58,7 +60,7 @@ export default function Incidents() {
         </div>
         <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)} style={sel}>
           <option value="">All statuses</option>
-          {['Submitted','Assigned','Pending ISO Closure','Pending Admin Approval','Admin Approved','Overdue','Closed','Rejected'].map(s => <option key={s}>{s}</option>)}
+          {INCIDENT_STATUSES.map(s => <option key={s}>{s}</option>)}
         </select>
         <select value={filterSeverity} onChange={e => setFilterSeverity(e.target.value)} style={sel}>
           <option value="">All severities</option>
@@ -93,6 +95,12 @@ export default function Incidents() {
               <span style={{ fontSize:12, color:'var(--text-muted)' }}>{formatDate(inc.updatedAt)}</span>
             </div>
           ))}
+        </div>
+      )}
+
+      {isIRT && (
+        <div style={{ display:'flex', justifyContent:'flex-end', marginTop:20, paddingTop:20, borderTop:'1px solid var(--border)' }}>
+          <Button variant="secondary" onClick={() => exportToExcel(all, state.users)} icon={<FileDown size={15} />}>Export Excel</Button>
         </div>
       )}
     </div>

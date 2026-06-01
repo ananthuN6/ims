@@ -1,9 +1,10 @@
 // frontend/src/pages/Dashboard.jsx
 /* eslint-disable */
 import React, { useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { useApp, useCurrentUser } from '../context/AppContext';
-import { getVisibleIncidents, formatDateTime } from '../utils';
+import { getVisibleIncidents, isRejectedIncident, formatDateTime } from '../utils';
+import { hasIRTRole, PENDING_DASHBOARD_STATUSES } from '../constants';
 import { StatusBadge, SeverityBadge, Card, Spinner } from '../components/ui';
 import { FilePlus, AlertCircle, CheckCircle2, Clock, XCircle, TrendingUp } from 'lucide-react';
 
@@ -25,21 +26,27 @@ export default function Dashboard() {
   const { state, loadIncidents } = useApp();
   const user = useCurrentUser();
   const navigate = useNavigate();
+  const location = useLocation();
 
-  useEffect(() => { loadIncidents(); }, []);
+  useEffect(() => { loadIncidents(); }, [location.pathname, loadIncidents]);
 
   const incidents = getVisibleIncidents(state.incidents, user);
   const stats = {
     total:     incidents.length,
     submitted: incidents.filter(i => i.status === 'Submitted').length,
     assigned:  incidents.filter(i => i.status === 'Assigned').length,
-    pending:   incidents.filter(i => ['Pending ISO Closure','Pending Admin Approval','Admin Approved'].includes(i.status)).length,
+    pending:   incidents.filter(i => PENDING_DASHBOARD_STATUSES.includes(i.status)).length,
     overdue:   incidents.filter(i => i.status === 'Overdue').length,
     closed:    incidents.filter(i => i.status === 'Closed').length,
-    rejected:  incidents.filter(i => i.status === 'Rejected').length,
+    rejected:  incidents.filter(isRejectedIncident).length,
   };
-  const recent = [...incidents].sort((a,b) => b.updatedAt?.localeCompare(a.updatedAt)).slice(0,5);
-  const isISO = user?.role === 'iso';
+  const rejectedIncidents = incidents
+    .filter(isRejectedIncident)
+    .sort((a, b) => (b.updatedAt || '').localeCompare(a.updatedAt || ''));
+  const recent = [...incidents]
+    .sort((a, b) => (b.updatedAt || '').localeCompare(a.updatedAt || ''))
+    .slice(0, 5);
+  const isIRT = hasIRTRole(user);
   const myAssigned = incidents.filter(i => i.ownerId === user?.id && i.status === 'Assigned');
 
   return (
@@ -49,7 +56,7 @@ export default function Dashboard() {
           Welcome back, {user?.name?.split(' ')[0]} 👋
         </h1>
         <p style={{ color:'var(--text-secondary)', fontSize:14 }}>
-          {isISO ? 'ISO Team Dashboard – manage and review all incidents' : 'Your incident overview and updates'}
+          {isIRT ? 'IRT Dashboard – manage and review all incidents' : 'Your incident overview and updates'}
         </p>
       </div>
 
@@ -63,12 +70,12 @@ export default function Dashboard() {
         <StatCard label="Rejected"  value={stats.rejected}   icon={XCircle}     color="#ef4444" />
       </div>
 
-      {!isISO && (
+      {!isIRT && (
         <Card style={{ marginBottom:28, background:'linear-gradient(135deg,rgba(59,130,246,.12),rgba(99,102,241,.08))', border:'1px solid rgba(59,130,246,.2)' }}>
           <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', flexWrap:'wrap', gap:16 }}>
             <div>
               <h3 style={{ fontWeight:600, marginBottom:4 }}>Need to report an incident?</h3>
-              <p style={{ fontSize:13, color:'var(--text-secondary)' }}>Submit a new incident for ISO Team review.</p>
+              <p style={{ fontSize:13, color:'var(--text-secondary)' }}>Submit a new incident for IRT review.</p>
             </div>
             <button onClick={() => navigate('/report')} style={{ display:'flex', alignItems:'center', gap:8, background:'var(--accent-blue)', color:'#fff', border:'none', borderRadius:8, padding:'10px 20px', fontSize:14, fontWeight:600, cursor:'pointer' }}>
               <FilePlus size={16} /> Report Incident
@@ -77,7 +84,38 @@ export default function Dashboard() {
         </Card>
       )}
 
-      {!isISO && myAssigned.length > 0 && (
+      {rejectedIncidents.length > 0 && (
+        <div style={{ marginBottom:28 }}>
+          <h2 style={{ fontSize:16, fontWeight:600, marginBottom:14, display:'flex', alignItems:'center', gap:8 }}>
+            <XCircle size={18} color="#fb7185" />
+            {isIRT ? 'Rejected Incidents' : 'Your Rejected Incidents'} ({rejectedIncidents.length})
+          </h2>
+          <div style={{ display:'flex', flexDirection:'column', gap:10 }}>
+            {rejectedIncidents.map(inc => (
+              <div key={inc.id} onClick={() => navigate(`/incidents/${inc.id}`)}
+                style={{ background:'rgba(244,63,94,.08)', border:'1px solid rgba(244,63,94,.25)', borderRadius:'var(--radius-md)', padding:'14px 18px', cursor:'pointer', display:'flex', justifyContent:'space-between', alignItems:'center', gap:12, flexWrap:'wrap', transition:'all var(--transition)' }}
+                onMouseEnter={e => e.currentTarget.style.background='rgba(244,63,94,.14)'}
+                onMouseLeave={e => e.currentTarget.style.background='rgba(244,63,94,.08)'}
+              >
+                <div style={{ flex:1, minWidth:200 }}>
+                  <span style={{ fontFamily:'var(--font-mono)', fontSize:12, color:'#fb7185' }}>{inc.incidentId}</span>
+                  <p style={{ fontSize:14, color:'var(--text-primary)', marginTop:2 }}>{inc.description.slice(0,80)}{inc.description.length>80?'…':''}</p>
+                  {inc.isoComments && (
+                    <p style={{ fontSize:12, color:'var(--text-muted)', marginTop:4 }}>Reason: {inc.isoComments.slice(0,100)}{inc.isoComments.length>100?'…':''}</p>
+                  )}
+                </div>
+                <div style={{ display:'flex', alignItems:'center', gap:10 }}>
+                  {!isIRT && <span style={{ fontSize:12, color:'var(--text-muted)' }}>{formatDateTime(inc.updatedAt).slice(0,16)}</span>}
+                  {isIRT && <span style={{ fontSize:12, color:'var(--text-muted)' }}>{inc.reportedByName}</span>}
+                  <StatusBadge status={isRejectedIncident(inc) ? 'Rejected' : inc.status} />
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {!isIRT && myAssigned.length > 0 && (
         <div style={{ marginBottom:28 }}>
           <h2 style={{ fontSize:16, fontWeight:600, marginBottom:14 }}>🎯 Assigned to You ({myAssigned.length})</h2>
           <div style={{ display:'flex', flexDirection:'column', gap:10 }}>

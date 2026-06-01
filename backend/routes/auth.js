@@ -2,6 +2,7 @@
 const express = require('express');
 const router  = express.Router();
 const cfg     = require('../config');
+const { IRT_ROLE } = require('../constants');
 const { Users } = require('../db/fileDb');
 const https = require('https');
 
@@ -74,7 +75,7 @@ router.post('/login', async (req, res) => {
           id:        uuidv4(),
           name:      profile.displayName || cfg.admin.name,
           email,
-          role:      'iso',
+          role:      IRT_ROLE,
           isAdmin:   true,
           createdAt: new Date().toISOString(),
         });
@@ -88,9 +89,9 @@ router.post('/login', async (req, res) => {
           createdAt: new Date().toISOString(),
         });
       }
-    } else if (isAdmin && (user.role !== 'iso' || !user.isAdmin)) {
+    } else if (isAdmin && ((user.role !== IRT_ROLE && user.role !== 'iso') || !user.isAdmin)) {
       // Fix role if admin was previously created with wrong role
-      user = await Users.update(user.id, { role: 'iso', isAdmin: true });
+      user = await Users.update(user.id, { role: IRT_ROLE, isAdmin: true });
     }
 
     if (user && user.name !== profile.displayName && profile.displayName) {

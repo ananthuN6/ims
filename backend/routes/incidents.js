@@ -4,6 +4,12 @@ const router  = express.Router();
 const { v4: uuidv4 } = require('uuid');
 const { Users, Incidents, EmailLog } = require('../db/fileDb');
 const email = require('../services/emailService');
+const {
+  STATUS_PENDING_IRT_CLOSURE,
+  PENDING_CLOSURE_STATUSES,
+  hasIRTRole,
+  isPendingIRTClosure,
+} = require('../constants');
 
 // ── Auth helpers ─────────────────────────────────────────────
 async function getCallerUser(req) {
@@ -18,17 +24,17 @@ async function requireAuth(req, res, next) {
   next();
 }
 
-async function requireISO(req, res, next) {
+async function requireIRT(req, res, next) {
   const user = await getCallerUser(req);
   if (!user) return res.status(401).json({ error: 'Not authenticated' });
-  if (user.role !== 'iso') return res.status(403).json({ error: 'ISO role required' });
+  if (!hasIRTRole(user)) return res.status(403).json({ error: 'IRT role required' });
   req.imsUser = user;
   next();
 }
 
 // ── Visibility filter ─────────────────────────────────────────
 function visibleTo(incident, user) {
-  if (user.role === 'iso') return true;
+  if (hasIRTRole(user) || user.isAdmin) return true;
   const userEmail = user.email?.toLowerCase();
   const userName = user.name?.toLowerCase();
   const ownerEmail = incident.ownerEmail?.toLowerCase();
@@ -102,18 +108,13 @@ function shouldThrottleResponseReminder(incident, now) {
 
 function getAdminRevertStatus(status) {
   switch (status) {
-    case 'Closed': return 'Pending ISO Closure';
+    case 'Closed': return STATUS_PENDING_IRT_CLOSURE;
     case 'Admin Approved': return 'Pending Admin Approval';
     case 'Overdue':
     case 'Pending Admin Approval': return 'Assigned';
     case 'Assigned': return 'Submitted';
     default: return status;
   }
-}
-
-async function getHigherRecipientEmails() {
-  const all = await Users.all();
-  return all.filter(u => u.role === 'iso' || u.isAdmin).map(u => u.email).filter(Boolean);
 }
 
 async function auditOverdueIncidents() {
@@ -123,12 +124,10 @@ async function auditOverdueIncidents() {
   for (const inc of incidents) {
     if (shouldSendResponseReminder(inc, now) && shouldThrottleResponseReminder(inc, now)) {
       const updated = await Incidents.update(inc.id, { responseNotifiedAt: now });
-      const isoEmails = await getHigherRecipientEmails();
-      const notifyEmails = [inc.ownerEmail, ...isoEmails].filter(Boolean);
-      if (notifyEmails.length) email.notifyResponseReminder(updated, notifyEmails).catch(console.error);
+      email.notifyResponseReminder(updated, {}).catch(console.error);
     }
 
-    if (!['Assigned','Pending ISO Closure','Pending Admin Approval'].includes(inc.status)) continue;
+    if (!['Assigned', ...PENDING_CLOSURE_STATUSES].includes(inc.status)) continue;
     if (!isPastTargetDate(inc.targetDate)) continue;
 
     const updated = await Incidents.update(inc.id, {
@@ -137,8 +136,7 @@ async function auditOverdueIncidents() {
     });
 
     if (!inc.overdueNotifiedAt) {
-      const higherEmails = await getHigherRecipientEmails();
-      if (higherEmails.length) email.notifyOverdue(updated, higherEmails).catch(console.error);
+      email.notifyOverdue(updated, {}).catch(console.error);
     }
   }
 }
@@ -162,11 +160,20 @@ router.get('/', requireAuth, async (req, res) => {
   }
 });
 
-// GET /api/incidents/emaillog/all – ISO only
-router.get('/emaillog/all', requireISO, async (req, res) => {
+// GET /api/incidents/emaillog/all – IRT only
+router.get('/emaillog/all', requireIRT, async (req, res) => {
   try {
     const logs = await EmailLog.all();
     res.json(logs.reverse());
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/incidents/next-id – preview next incident ID
+router.get('/next-id', requireAuth, async (req, res) => {
+  try {
+    res.json({ incidentId: await genIncidentId() });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -213,9 +220,7 @@ router.post('/', requireAuth, async (req, res) => {
       updatedAt: new Date().toISOString(),
     });
 
-    const isoUsers = await Users.byRole('iso');
-    const isoEmails = isoUsers.map(u => u.email);
-    email.notifyNewIncident(incident, isoEmails).catch(console.error);
+    email.notifyNewIncident(incident, { actorEmail: req.imsUser.email }).catch(console.error);
 
     res.status(201).json(incident);
   } catch (err) {
@@ -225,7 +230,7 @@ router.post('/', requireAuth, async (req, res) => {
 });
 
 // PATCH /api/incidents/:id/validate
-router.patch('/:id/validate', requireISO, async (req, res) => {
+router.patch('/:id/validate', requireIRT, async (req, res) => {
   try {
     const { validationStatus, severity, ownerId, ownerEmail, ownerName, isoComments } = req.body;
     if (!validationStatus) return res.status(400).json({ error: 'validationStatus required' });
@@ -296,10 +301,9 @@ router.patch('/:id/validate', requireISO, async (req, res) => {
     });
 
     if (validationStatus === 'Valid' && owner) {
-      email.notifyAssigned(updated, owner.email).catch(console.error);
+      email.notifyAssigned(updated, { actorEmail: req.imsUser.email }).catch(console.error);
     } else if (validationStatus === 'Invalid') {
-      const reporter = await Users.findById(inc.reportedBy);
-      if (reporter) email.notifyRejected(updated, reporter.email).catch(console.error);
+      email.notifyRejected(updated, { comment: isoComments, actorEmail: req.imsUser.email }).catch(console.error);
     }
 
     res.json(updated);
@@ -315,9 +319,12 @@ router.patch('/:id/closure', requireAuth, async (req, res) => {
     const inc = await Incidents.findById(req.params.id);
     if (!inc) return res.status(404).json({ error: 'Not found' });
 
-    const isOwner = req.imsUser.id === inc.ownerId;
-    const isISO   = req.imsUser.role === 'iso';
-    if (!isOwner && !isISO) return res.status(403).json({ error: 'Only the assigned owner or ISO can submit closure' });
+    const normalizedUserEmail = req.imsUser.email?.toLowerCase();
+    const ownerEmailOnInc = inc.ownerEmail?.toLowerCase();
+    const isOwner = req.imsUser.id === inc.ownerId
+      || (ownerEmailOnInc && normalizedUserEmail === ownerEmailOnInc);
+    const isIRT = hasIRTRole(req.imsUser);
+    if (!isOwner && !isIRT) return res.status(403).json({ error: 'Only the assigned owner or IRT can submit RCA' });
     if (!['Assigned','Overdue'].includes(inc.status)) return res.status(409).json({ error: 'Incident is not in Assigned or Overdue state' });
 
     const { rca, correction, correctiveAction, targetDate, closureAttachments } = req.body;
@@ -326,15 +333,23 @@ router.patch('/:id/closure', requireAuth, async (req, res) => {
     }
 
     const finalStatus = isPastTargetDate(targetDate) ? 'Overdue' : 'Pending Admin Approval';
+    const ownerPatch = {};
+    if (isOwner) {
+      if (!inc.ownerId) ownerPatch.ownerId = req.imsUser.id;
+      if (!inc.ownerEmail) ownerPatch.ownerEmail = req.imsUser.email;
+      if (!inc.ownerName) ownerPatch.ownerName = req.imsUser.name;
+    }
+
     const updated = await Incidents.update(inc.id, {
       rca, correction, correctiveAction, targetDate,
       closureAttachments: closureAttachments || [],
       status: finalStatus,
       responseSubmittedAt: new Date().toISOString(),
+      ...ownerPatch,
       actionLog: [
         ...(inc.actionLog || []),
         {
-          id: uuidv4(), action: 'Closure Submitted',
+          id: uuidv4(), action: 'RCA Submitted',
           fromStatus: inc.status, toStatus: finalStatus,
           by: req.imsUser.name, byEmail: req.imsUser.email, role: req.imsUser.role,
           comment: `Target date set to ${targetDate}`, at: new Date().toISOString(),
@@ -342,9 +357,7 @@ router.patch('/:id/closure', requireAuth, async (req, res) => {
       ],
     });
 
-    const isoUsers = await Users.byRole('iso');
-    const isoEmails = isoUsers.map(u => u.email);
-    email.notifyClosureSubmitted(updated, isoEmails).catch(console.error);
+    email.notifyClosureSubmitted(updated, { actorEmail: req.imsUser.email }).catch(console.error);
 
     res.json(updated);
   } catch (err) {
@@ -353,29 +366,32 @@ router.patch('/:id/closure', requireAuth, async (req, res) => {
   }
 });
 
-// PATCH /api/incidents/:id/approve
-router.patch('/:id/approve', requireISO, async (req, res) => {
+// PATCH /api/incidents/:id/approve — IRT approves RCA
+router.patch('/:id/approve', requireIRT, async (req, res) => {
   try {
     const inc = await Incidents.findById(req.params.id);
     if (!inc) return res.status(404).json({ error: 'Not found' });
-    if (!['Pending Admin Approval','Overdue'].includes(inc.status)) return res.status(409).json({ error: 'Incident is not awaiting approval' });
+    if (!['Pending Admin Approval','Overdue'].includes(inc.status)) {
+      return res.status(409).json({ error: 'Incident is not awaiting RCA approval' });
+    }
 
     const updated = await Incidents.update(inc.id, {
       status: 'Admin Approved',
       actionLog: [
         ...(inc.actionLog || []),
         {
-          id: uuidv4(), action: 'Admin Approved',
+          id: uuidv4(), action: 'RCA Approved',
           fromStatus: inc.status, toStatus: 'Admin Approved',
           by: req.imsUser.name, byEmail: req.imsUser.email, role: req.imsUser.role,
-          comment: 'Closure approved and ready for final close', at: new Date().toISOString(),
+          comment: 'RCA approved; owner or IRT may complete final closure', at: new Date().toISOString(),
         },
       ],
     });
 
-    const recipientIds = [...new Set([inc.reportedBy, inc.ownerId].filter(Boolean))];
-    const recipientEmails = (await Promise.all(recipientIds.map(id => Users.findById(id)))).map(u => u?.email).filter(Boolean);
-    email.notifyAdminApproved(updated, recipientEmails).catch(console.error);
+    email.notifyAdminApproved(updated, {
+      actorEmail: req.imsUser.email,
+      approvedBy: req.imsUser.name,
+    }).catch(console.error);
 
     res.json(updated);
   } catch (err) {
@@ -389,7 +405,7 @@ router.patch('/:id/close', requireAuth, async (req, res) => {
   try {
     const inc = await Incidents.findById(req.params.id);
     if (!inc) return res.status(404).json({ error: 'Not found' });
-    if (inc.status !== 'Admin Approved') return res.status(409).json({ error: 'Incident is not approved for closure' });
+    if (inc.status !== 'Admin Approved') return res.status(409).json({ error: 'RCA must be approved before closure' });
 
     const normalizedUserEmail = req.imsUser.email?.toLowerCase();
     const normalizedUserName  = req.imsUser.name?.toLowerCase();
@@ -398,8 +414,8 @@ router.patch('/:id/close', requireAuth, async (req, res) => {
     const isOwner = req.imsUser.id === inc.ownerId
       || (ownerEmail && normalizedUserEmail === ownerEmail)
       || (!inc.ownerId && ownerName && normalizedUserName === ownerName);
-    const isISO = req.imsUser.role === 'iso';
-    if (!isOwner && !isISO) return res.status(403).json({ error: 'Only the assigned owner or ISO can close this incident' });
+    const isIRT = hasIRTRole(req.imsUser);
+    if (!isOwner && !isIRT) return res.status(403).json({ error: 'Only the assigned owner or IRT can close this incident' });
 
     const { closedDate, reviewDate, reviewedBy, lessonsLearned } = req.body;
     if (!closedDate) return res.status(400).json({ error: 'closedDate required' });
@@ -407,10 +423,10 @@ router.patch('/:id/close', requireAuth, async (req, res) => {
     const finalReviewDate = reviewDate || closedDate;
     const finalReviewedBy = reviewedBy || (isOwner ? req.imsUser.name : '');
 
-    if (isISO && (!reviewDate || !reviewedBy)) {
-      return res.status(400).json({ error: 'reviewDate and reviewedBy required for ISO closure' });
+    if (isIRT && (!reviewDate || !reviewedBy)) {
+      return res.status(400).json({ error: 'reviewDate and closedBy required for IRT closure' });
     }
-    if (!finalReviewedBy) return res.status(400).json({ error: 'reviewedBy required' });
+    if (!finalReviewedBy) return res.status(400).json({ error: 'closedBy required' });
 
     const updated = await Incidents.update(inc.id, {
       closedDate, reviewDate: finalReviewDate, reviewedBy: finalReviewedBy,
@@ -426,9 +442,10 @@ router.patch('/:id/close', requireAuth, async (req, res) => {
       ],
     });
 
-    const recipientIds = [...new Set([inc.reportedBy, inc.ownerId].filter(Boolean))];
-    const recipientEmails = (await Promise.all(recipientIds.map(id => Users.findById(id)))).map(u => u?.email).filter(Boolean);
-    email.notifyClosed(updated, recipientEmails).catch(console.error);
+    email.notifyClosed(updated, {
+      actorEmail: req.imsUser.email,
+      closedBy: req.imsUser.name,
+    }).catch(console.error);
 
     res.json(updated);
   } catch (err) {
@@ -438,7 +455,7 @@ router.patch('/:id/close', requireAuth, async (req, res) => {
 });
 
 // PATCH /api/incidents/:id/reject
-router.patch('/:id/reject', requireISO, async (req, res) => {
+router.patch('/:id/reject', requireIRT, async (req, res) => {
   try {
     const inc = await Incidents.findById(req.params.id);
     if (!inc) return res.status(404).json({ error: 'Not found' });
@@ -447,19 +464,29 @@ router.patch('/:id/reject', requireISO, async (req, res) => {
     const { comment } = req.body;
     if (!comment) return res.status(400).json({ error: 'Comment required' });
 
-    const toStatus = getAdminRevertStatus(inc.status);
+    const fromStatus = inc.status;
+    const toStatus = getAdminRevertStatus(fromStatus);
     const updated = await Incidents.update(inc.id, {
       status: toStatus,
+      isoComments: comment,
       actionLog: [
         ...(inc.actionLog || []),
         {
           id: uuidv4(), action: 'Admin Reject',
-          fromStatus: inc.status, toStatus,
+          fromStatus, toStatus,
           by: req.imsUser.name, byEmail: req.imsUser.email, role: req.imsUser.role,
           comment, at: new Date().toISOString(),
         },
       ],
     });
+
+    email.notifyAdminReopened(updated, {
+      fromStatus,
+      toStatus,
+      comment,
+      rejectedBy: req.imsUser.name,
+      actorEmail: req.imsUser.email,
+    }).catch(console.error);
 
     res.json(updated);
   } catch (err) {

@@ -19,12 +19,12 @@ module.exports = {
     senderEmail:  process.env.AZURE_SENDER_EMAIL || '',
   },
 
-  // ── Admin ISO user (hardcoded, logs in with MS SSO) ───────
+  // ── Admin IRT user (hardcoded, logs in with MS SSO) ───────
   // This is the ONE person who can add/edit/delete users.
   // Their Microsoft account email must match exactly.
   admin: {
     email: process.env.ADMIN_EMAIL || '',
-    name:  process.env.ADMIN_NAME  || 'Admin ISO',
+    name:  process.env.ADMIN_NAME  || 'Admin IRT',
   },
 
   // ── File-based DB paths (relative to backend/) ────────────

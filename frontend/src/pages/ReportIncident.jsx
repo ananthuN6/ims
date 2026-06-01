@@ -1,6 +1,6 @@
 // frontend/src/pages/ReportIncident.jsx
 /* eslint-disable */
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useApp, useCurrentUser } from '../context/AppContext';
 import { api } from '../utils/api';
@@ -17,6 +17,13 @@ export default function ReportIncident() {
   const [errors, setErrors] = useState({});
   const [toast, setToast] = useState(null);
   const [submitting, setSubmitting] = useState(false);
+  const [nextIncidentId, setNextIncidentId] = useState('');
+
+  useEffect(() => {
+    api.getNextIncidentId()
+      .then(({ incidentId }) => setNextIncidentId(incidentId))
+      .catch(() => setNextIncidentId(''));
+  }, []);
 
   const validate = () => {
     const e = {};
@@ -39,7 +46,7 @@ export default function ReportIncident() {
       const incident = await api.createIncident({ ...form, attachments });
       dispatch({ type:'UPSERT_INCIDENT', incident });
       dispatch({ type:'ADD_NOTIF', message:`Incident ${incident.incidentId} submitted successfully` });
-      setToast({ message:'Incident submitted! ISO Team has been notified by email.', type:'success' });
+      setToast({ message:'Incident submitted! IRT has been notified by email.', type:'success' });
       setTimeout(() => navigate('/incidents'), 1600);
     } catch (err) {
       setToast({ message: err.message, type:'error' });
@@ -53,12 +60,18 @@ export default function ReportIncident() {
         <h1 style={{ fontSize:22, fontWeight:700, letterSpacing:'-0.02em', display:'flex', alignItems:'center', gap:10 }}>
           <FilePlus size={22} color="var(--accent-blue)" /> Report Incident
         </h1>
-        <p style={{ color:'var(--text-secondary)', fontSize:14, marginTop:4 }}>Fill in the details below. The ISO Team will be notified by Outlook email immediately.</p>
+        <p style={{ color:'var(--text-secondary)', fontSize:14, marginTop:4 }}>Fill in the details below. The IRT will be notified by Outlook email immediately.</p>
       </div>
       <Card>
         <form onSubmit={handleSubmit} style={{ display:'flex', flexDirection:'column', gap:20 }}>
           <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:16 }}>
-            <FormField label="Incident ID"><Input value="Auto-generated" disabled style={{ color:'var(--text-muted)', fontFamily:'var(--font-mono)', fontSize:13 }} /></FormField>
+            <FormField label="Incident ID">
+              <Input
+                value={nextIncidentId || 'Loading…'}
+                disabled
+                style={{ color: nextIncidentId ? 'var(--accent-cyan)' : 'var(--text-muted)', fontFamily: 'var(--font-mono)', fontSize: 13 }}
+              />
+            </FormField>
             <FormField label="Reported By"><Input value={user?.name} disabled style={{ color:'var(--text-secondary)' }} /></FormField>
           </div>
           <FormField label="Incident Date" required error={errors.incidentDate}>

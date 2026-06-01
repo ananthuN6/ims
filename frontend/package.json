@@ -6,6 +6,7 @@
     "@azure/msal-browser": "^3.10.0",
     "@azure/msal-react": "^2.0.22",
     "date-fns": "^3.3.1",
+    "ims-v2": "file:..",
     "lucide-react": "^0.363.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
@@ -19,10 +20,22 @@
     "build": "react-scripts build",
     "test": "react-scripts test"
   },
-  "eslintConfig": { "extends": ["react-app"] },
+  "eslintConfig": {
+    "extends": [
+      "react-app"
+    ]
+  },
   "browserslist": {
-    "production": [">0.2%","not dead","not op_mini all"],
-    "development": ["last 1 chrome version","last 1 firefox version","last 1 safari version"]
+    "production": [
+      ">0.2%",
+      "not dead",
+      "not op_mini all"
+    ],
+    "development": [
+      "last 1 chrome version",
+      "last 1 firefox version",
+      "last 1 safari version"
+    ]
   },
   "proxy": "http://localhost:4000"
 }

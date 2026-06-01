@@ -6,8 +6,9 @@ import { api } from '../utils/api';
 import { Card, Button, Input, Select, FormField, Toast, EmptyState, Spinner } from '../components/ui';
 import { Users, UserPlus, Pencil, Trash2, ShieldCheck, User } from 'lucide-react';
 
-const ROLE_LABELS = { iso:'ISO Team', employee:'Employee' };
-const ROLE_COLORS = { iso:'var(--accent-cyan)', employee:'var(--text-secondary)' };
+import { ROLE_LABELS, IRT_ROLE, LEGACY_IRT_ROLE } from '../constants';
+
+const ROLE_COLORS = { [IRT_ROLE]:'var(--accent-cyan)', [LEGACY_IRT_ROLE]:'var(--accent-cyan)', employee:'var(--text-secondary)' };
 
 function UserRow({ user, onEdit, onDelete, currentUserId }) {
   const isSelf = user.id === currentUserId;
@@ -101,7 +102,7 @@ export default function Admin() {
     } catch (e) { showToast(e.message, 'error'); }
   };
 
-  const isoCount = users.filter(u => u.role === 'iso').length;
+  const irtCount = users.filter(u => u.role === IRT_ROLE || u.role === LEGACY_IRT_ROLE).length;
   const empCount = users.filter(u => u.role === 'employee').length;
 
   return (
@@ -140,7 +141,7 @@ export default function Admin() {
       <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit,minmax(140px,1fr))', gap:16, marginBottom:24 }}>
         {[
           { label:'Total Users', value:users.length, color:'#3b82f6' },
-          { label:'ISO Team',    value:isoCount,      color:'#06b6d4' },
+          { label:'IRT',    value:irtCount,      color:'#06b6d4' },
           { label:'Employees',   value:empCount,      color:'#8b5cf6' },
         ].map(s => (
           <Card key={s.label} style={{ padding:'16px 20px' }}>
@@ -167,7 +168,7 @@ export default function Admin() {
               <FormField label="Role" required>
                 <Select value={form.role} onChange={e => setForm(f => ({ ...f, role:e.target.value }))}>
                   <option value="employee">Employee</option>
-                  <option value="iso">ISO Team</option>
+                  <option value="irt">IRT</option>
                 </Select>
               </FormField>
             </div>

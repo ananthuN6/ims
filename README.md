@@ -96,10 +96,10 @@ module.exports = {
   },
 
   admin: {
-    // The Microsoft account (UPN) of the one admin ISO user.
+    // The Microsoft account (UPN) of the one admin IRT user.
     // On first login this person is auto-created in the DB with isAdmin: true.
     email: 'admin.iso@yourcompany.com',
-    name:  'Admin ISO',
+    name:  'Admin IRT',
   },
 
   db: {
@@ -173,39 +173,39 @@ npm start
 
 | Role | What they can do |
 |---|---|
-| **Employee** | Submit incidents · View own incidents · Submit closure details when assigned as owner |
-| **ISO Team** | View ALL incidents · Validate/assign/reject incidents · Close incidents · Export Excel · View email log |
-| **Admin ISO** | Everything ISO can do + add/edit/delete users in User Admin |
+| **Employee** | Submit incidents · View own incidents · Submit RCA when assigned as owner |
+| **IRT** | View ALL incidents · Validate/assign/reject incidents · Close incidents · Export Excel · View email log |
+| **Admin IRT** | Everything IRT can do + add/edit/delete users in User Admin |
 
-> ISO Team can also submit incidents and be assigned as owner — they have full access to all roles' functionality.
+> IRT members can also submit incidents and be assigned as owner — they have full access to all roles' functionality.
 
 ---
 
 ## Incident Workflow
 
 ```
-[Employee]        [ISO Team]         [Owner]
+[Employee]        [IRT]              [Owner]
 Submit            Validate
 Incident   ────►  & Assign   ─────►  Submit RCA
                   or Reject          & Closure
                      │                  │
                      ▼                  ▼
-                  [Rejected]        [ISO Final
+                  [Rejected]        [IRT Final
                                      Closure]
                                     (with Lessons
                                      Learned)
 ```
 
 ### Status flow
-`Submitted` → `Assigned` or `Rejected` → `Pending ISO Closure` → `Closed`
+`Submitted` → `Assigned` or `Rejected` → `Pending IRT Closure` → `Closed`
 
 ### Who gets emailed
 | Event | Recipients | Via |
 |---|---|---|
-| Incident submitted | All ISO Team | Outlook (Graph) |
+| Incident submitted | All IRT | Outlook (Graph) |
 | Validated & assigned | Assigned owner | Outlook (Graph) |
 | Rejected | Reporter | Outlook (Graph) |
-| Closure details submitted | All ISO Team | Outlook (Graph) |
+| RCA submitted | All IRT | Outlook (Graph) |
 | Incident closed | Reporter + Owner | Outlook (Graph) |
 
 ---
@@ -263,7 +263,7 @@ CREATE TABLE Users (
   id          NVARCHAR(36) PRIMARY KEY,
   name        NVARCHAR(200) NOT NULL,
   email       NVARCHAR(200) NOT NULL UNIQUE,
-  role        NVARCHAR(20) NOT NULL CHECK (role IN ('employee','iso')),
+  role        NVARCHAR(20) NOT NULL CHECK (role IN ('employee','irt')),
   isAdmin     BIT DEFAULT 0,
   createdAt   DATETIME2 DEFAULT GETDATE()
 );
