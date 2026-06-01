@@ -20,7 +20,8 @@ const TYPE_META = {
   admin_approved:     { label:'RCA Approved',          color:'#34d399' },
   closed:             { label:'Incident Closed',       color:'#34d399' },
   overdue:            { label:'Incident Overdue',      color:'#f97316' },
-  response_reminder:  { label:'RCA Response Reminder', color:'#f97316' },
+  validation_reminder:{ label:'IRT Validation Reminder', color:'#f97316' },
+  response_reminder:  { label:'RCA Submission Reminder', color:'#f97316' },
 };
 
 export default function EmailLog() {

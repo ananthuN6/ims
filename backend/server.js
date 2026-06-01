@@ -20,9 +20,22 @@ app.use('/api/incidents', require('./routes/incidents'));
 app.get('/api/health', (_, res) => res.json({ ok: true, ts: new Date().toISOString() }));
 
 // ── Start ─────────────────────────────────────────────────────
+const { runDailyReminders } = require('./services/reminderService');
+
+const REMINDER_INTERVAL_MS = Number(process.env.REMINDER_INTERVAL_MS) || 60 * 60 * 1000;
+
 const PORT = cfg.server.port || 4000;
 app.listen(PORT, () => {
   console.log(`\n🛡️  IMS Backend running on http://localhost:${PORT}`);
   console.log(`   Frontend expected at: ${cfg.server.frontendUrl}`);
-  console.log(`   Admin IRT account:    ${cfg.admin.email}\n`);
+  console.log(`   Admin IRT account:    ${cfg.admin.email}`);
+  console.log(`   Reminder check:       every ${REMINDER_INTERVAL_MS / 60000} min (working days)\n`);
+
+  setTimeout(() => {
+    runDailyReminders().catch(err => console.error('[Reminders] startup run failed:', err.message));
+  }, 15000);
+
+  setInterval(() => {
+    runDailyReminders().catch(err => console.error('[Reminders] scheduled run failed:', err.message));
+  }, REMINDER_INTERVAL_MS);
 });

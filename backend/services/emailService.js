@@ -201,9 +201,27 @@ function buildHtml(title, lines, incidentId, appUrl = '') {
 //   Owner closes        → IRT + Owner
 //   Approve closure     → Owner + Reporter + IRT
 //   Reject closure      → Owner + IRT
-//   Overdue / RCA reminder → Owner + IRT
+//   Validation reminder (daily) → IRT
+//   RCA submission reminder (daily) → Owner + IRT
+//   Overdue (target date) → Owner + IRT
 
 const appUrl = cfg.server?.frontendUrl || '';
+
+async function notifyValidationReminder(incident, { actorEmail } = {}) {
+  await sendToInvolved(incident, {
+    irt: true,
+    actorEmail,
+    subject: `[IMS] Validation Reminder – ${incident.incidentId}`,
+    type: 'validation_reminder',
+    title: 'IRT Validation Pending',
+    lines: [
+      `<strong style="color:#f0f4ff;">Incident:</strong> ${incident.incidentId}`,
+      `<strong style="color:#f0f4ff;">Reported by:</strong> ${incident.reportedByName || '—'}`,
+      `<strong style="color:#f0f4ff;">Submitted:</strong> ${incident.createdAt ? new Date(incident.createdAt).toLocaleDateString() : '—'}`,
+      `<br>This incident has been waiting for IRT validation for at least one working day. Please review and validate it in IMS.`,
+    ],
+  });
+}
 
 async function notifyNewIncident(incident, { actorEmail } = {}) {
   await sendToInvolved(incident, {
@@ -459,16 +477,19 @@ async function notifyResponseReminder(incident, { actorEmail } = {}) {
     owner: true,
     irt: true,
     actorEmail,
-    subject: `[IMS] RCA Response Overdue – ${incident.incidentId}`,
+    subject: `[IMS] RCA Submission Reminder – ${incident.incidentId}`,
     type: 'response_reminder',
-    title: 'RCA Response Overdue',
+    title: 'RCA Submission Reminder',
     lines: [
       `<strong style="color:#f0f4ff;">Incident:</strong> ${incident.incidentId}`,
+      `<strong style="color:#f0f4ff;">Owner:</strong> ${incident.ownerName || '—'}`,
       `<strong style="color:#f0f4ff;">Severity:</strong> ${incident.severity || '—'}`,
       `<strong style="color:#f0f4ff;">Target Date:</strong> ${incident.targetDate || '—'}`,
-      `<strong style="color:#f0f4ff;">Response Due:</strong> ${incident.responseDeadline ? new Date(incident.responseDeadline).toLocaleString() : '—'}`,
-      `<br>The assigned owner has not yet submitted their RCA. Please take action.`,
-    ],
+      incident.responseDeadline
+        ? `<strong style="color:#f0f4ff;">Response Due:</strong> ${new Date(incident.responseDeadline).toLocaleString()}`
+        : '',
+      `<br>The RCA has not been submitted. This reminder is sent on each working day until the owner submits RCA in IMS.`,
+    ].filter(Boolean),
   });
 }
 
@@ -559,6 +580,7 @@ async function notifyClosed(incident, { actorEmail, closedBy } = {}) {
 }
 
 module.exports = {
+  notifyValidationReminder,
   notifyNewIncident,
   notifyAssigned,
   notifyRejected,

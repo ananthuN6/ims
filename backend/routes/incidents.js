@@ -4,6 +4,8 @@ const router  = express.Router();
 const { v4: uuidv4 } = require('uuid');
 const { Users, Incidents, EmailLog } = require('../db/fileDb');
 const email = require('../services/emailService');
+const { runDailyReminders } = require('../services/reminderService');
+const { addBusinessDays, addBusinessHours } = require('../utils/businessDays');
 const {
   STATUS_PENDING_IRT_CLOSURE,
   STATUS_PENDING_CLOSURE_APPROVAL,
@@ -52,61 +54,6 @@ function isPastTargetDate(targetDate) {
   return targetDate < today;
 }
 
-function addBusinessDays(date, days) {
-  const result = new Date(date);
-  while (days > 0) {
-    result.setDate(result.getDate() + 1);
-    const day = result.getDay();
-    if (day !== 0 && day !== 6) days -= 1;
-  }
-  return result.toISOString().slice(0,10);
-}
-
-function addBusinessHours(date, hours) {
-  const result = new Date(date);
-  const moveToNextBusiness = () => {
-    while (result.getDay() === 0 || result.getDay() === 6) {
-      result.setDate(result.getDate() + 1);
-    }
-    if (result.getHours() < 9) result.setHours(9,0,0,0);
-    if (result.getHours() >= 17) {
-      result.setDate(result.getDate() + 1);
-      while (result.getDay() === 0 || result.getDay() === 6) {
-        result.setDate(result.getDate() + 1);
-      }
-      result.setHours(9,0,0,0);
-    }
-  };
-  moveToNextBusiness();
-  while (hours > 0) {
-    result.setHours(result.getHours() + 1);
-    if (result.getHours() >= 17) {
-      result.setDate(result.getDate() + 1);
-      while (result.getDay() === 0 || result.getDay() === 6) {
-        result.setDate(result.getDate() + 1);
-      }
-      result.setHours(9,0,0,0);
-    }
-    const day = result.getDay();
-    if (day !== 0 && day !== 6 && result.getHours() >= 9 && result.getHours() <= 17) {
-      hours -= 1;
-    }
-  }
-  return result.toISOString();
-}
-
-function shouldSendResponseReminder(incident, now) {
-  if (!incident.responseDeadline) return false;
-  if (!['Assigned','Overdue'].includes(incident.status)) return false;
-  if (incident.responseSubmittedAt) return false;
-  return incident.responseDeadline <= now;
-}
-
-function shouldThrottleResponseReminder(incident, now) {
-  if (!incident.responseNotifiedAt) return true;
-  return new Date(incident.responseNotifiedAt).getTime() + 3600000 <= new Date(now).getTime();
-}
-
 function hasRcaSubmitted(inc) {
   return !!(inc.rca && inc.correction && inc.correctiveAction) || !!inc.responseSubmittedAt;
 }
@@ -119,30 +66,6 @@ function appendLog(inc, entry) {
   return [...(inc.actionLog || []), entry];
 }
 
-async function auditOverdueIncidents() {
-  const incidents = await Incidents.all();
-  const now = new Date().toISOString();
-
-  for (const inc of incidents) {
-    if (shouldSendResponseReminder(inc, now) && shouldThrottleResponseReminder(inc, now)) {
-      const updated = await Incidents.update(inc.id, { responseNotifiedAt: now });
-      email.notifyResponseReminder(updated, {}).catch(console.error);
-    }
-
-    if (!['Assigned', 'Pending Admin Approval', 'Overdue'].includes(inc.status)) continue;
-    if (!isPastTargetDate(inc.targetDate)) continue;
-
-    const updated = await Incidents.update(inc.id, {
-      status: 'Overdue',
-      overdueNotifiedAt: inc.overdueNotifiedAt || now,
-    });
-
-    if (!inc.overdueNotifiedAt) {
-      email.notifyOverdue(updated, {}).catch(console.error);
-    }
-  }
-}
-
 // ── ID generator ─────────────────────────────────────────────
 async function genIncidentId() {
   const all = await Incidents.all();
@@ -153,7 +76,7 @@ async function genIncidentId() {
 // GET /api/incidents
 router.get('/', requireAuth, async (req, res) => {
   try {
-    await auditOverdueIncidents();
+    await runDailyReminders().catch(console.error);
     const all = await Incidents.all();
     res.json(all.filter(i => visibleTo(i, req.imsUser)));
   } catch (err) {
@@ -184,7 +107,7 @@ router.get('/next-id', requireAuth, async (req, res) => {
 // GET /api/incidents/:id
 router.get('/:id', requireAuth, async (req, res) => {
   try {
-    await auditOverdueIncidents();
+    await runDailyReminders().catch(console.error);
     const inc = await Incidents.findById(req.params.id);
     if (!inc) return res.status(404).json({ error: 'Not found' });
     if (!visibleTo(inc, req.imsUser)) return res.status(403).json({ error: 'Forbidden' });
@@ -286,6 +209,8 @@ router.patch('/:id/validate', requireIRT, async (req, res) => {
       responseDeadline,
       responseNotifiedAt: null,
       responseSubmittedAt: null,
+      validationReminderDate: null,
+      rcaReminderDate: null,
       actionLog: [
         ...(inc.actionLog || []),
         {
@@ -347,6 +272,7 @@ router.patch('/:id/closure', requireAuth, async (req, res) => {
       closureAttachments: closureAttachments || [],
       status: finalStatus,
       responseSubmittedAt: new Date().toISOString(),
+      rcaReminderDate: null,
       ...ownerPatch,
       actionLog: [
         ...(inc.actionLog || []),
