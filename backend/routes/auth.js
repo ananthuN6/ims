@@ -4,7 +4,20 @@ const router  = express.Router();
 const cfg     = require('../config');
 const { IRT_ROLE } = require('../constants');
 const { Users } = require('../db/fileDb');
+const { fetchMePhoto } = require('../services/graphPhotos');
 const https = require('https');
+
+function publicUser(user) {
+  return {
+    id: user.id,
+    name: user.name,
+    email: user.email,
+    role: user.role,
+    isAdmin: !!user.isAdmin,
+    hasPhoto: !!user.photoUrl,
+    photoUrl: user.photoUrl || null,
+  };
+}
 
 function fetchJwks() {
   return new Promise((resolve, reject) => {
@@ -98,15 +111,12 @@ router.post('/login', async (req, res) => {
       user = await Users.update(user.id, { name: profile.displayName });
     }
 
-    return res.json({
-      user: {
-        id:      user.id,
-        name:    user.name,
-        email:   user.email,
-        role:    user.role,
-        isAdmin: !!user.isAdmin,
-      },
-    });
+    const photoUrl = await fetchMePhoto(accessToken);
+    if (photoUrl && user && user.photoUrl !== photoUrl) {
+      user = await Users.update(user.id, { photoUrl });
+    }
+
+    return res.json({ user: publicUser(user) });
 
   } catch (err) {
     console.error('[Auth] login error:', err.message);

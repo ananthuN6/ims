@@ -16,6 +16,16 @@ const PENDING_CLOSURE_STATUSES = [
   STATUS_PENDING_CLOSURE_APPROVAL,
 ];
 
+const SEVERITY_OPTIONS = ['Critical', 'High', 'Medium'];
+
+const EXTEND_TARGET_STATUSES = [
+  'Assigned',
+  'Overdue',
+  'Pending Admin Approval',
+  'Admin Approved',
+  STATUS_PENDING_CLOSURE_APPROVAL,
+];
+
 /** IRT members (and system admin) — same app powers as admin except User Admin */
 function hasIRTRole(user) {
   if (!user) return false;
@@ -38,6 +48,8 @@ module.exports = {
   LEGACY_STATUS_PENDING_ISO_CLOSURE,
   STATUS_PENDING_CLOSURE_APPROVAL,
   PENDING_CLOSURE_STATUSES,
+  SEVERITY_OPTIONS,
+  EXTEND_TARGET_STATUSES,
   hasIRTRole,
   isPendingIRTClosure,
   normalizeIncidentStatus,

@@ -54,7 +54,7 @@ async function graphFetch(path, options = {}) {
 }
 
 async function getOrgUsers() {
-  const fields = 'displayName,mail,userPrincipalName,accountEnabled';
+  const fields = 'id,displayName,mail,userPrincipalName,accountEnabled';
   let url = `/users?$select=${fields}&$top=999`;
   const users = [];
 
@@ -245,14 +245,8 @@ async function notifyAssigned(incident, { actorEmail } = {}) {
     `<strong style="color:#f0f4ff;">Severity:</strong> ${incident.severity}`,
     `<strong style="color:#f0f4ff;">Owner:</strong> ${incident.ownerName || '—'}`,
     `<strong style="color:#f0f4ff;">Description:</strong><br>${incident.description}`,
+    `<br>The assigned owner must log in and submit their RCA with a target date.`,
   ];
-  if (incident.targetDate) {
-    lines.push(`<strong style="color:#f0f4ff;">Target Date:</strong> ${incident.targetDate}`);
-  }
-  if (incident.responseDeadline) {
-    lines.push(`<strong style="color:#f0f4ff;">Response Due:</strong> ${new Date(incident.responseDeadline).toLocaleString()}`);
-  }
-  lines.push('<br>The assigned owner must log in and submit their RCA.');
 
   await sendToInvolved(incident, {
     owner: true,
@@ -579,6 +573,24 @@ async function notifyClosed(incident, { actorEmail, closedBy } = {}) {
   });
 }
 
+async function notifyTargetDateExtended(incident, { actorEmail, remark, previousDate } = {}) {
+  await sendToInvolved(incident, {
+    owner: true,
+    irt: true,
+    actorEmail,
+    subject: `[IMS] Target Date Extended – ${incident.incidentId}`,
+    type: 'target_date_extended',
+    title: 'Target Date Extended',
+    lines: [
+      `<strong style="color:#f0f4ff;">Incident:</strong> ${incident.incidentId}`,
+      `<strong style="color:#f0f4ff;">Previous target date:</strong> ${previousDate || '—'}`,
+      `<strong style="color:#f0f4ff;">New target date:</strong> ${incident.targetDate || '—'}`,
+      `<strong style="color:#f0f4ff;">Remark:</strong><br>${remark || '—'}`,
+      `<br>View the updated target date and remark in IMS.`,
+    ],
+  });
+}
+
 module.exports = {
   notifyValidationReminder,
   notifyNewIncident,
@@ -596,8 +608,10 @@ module.exports = {
   notifyAdminApproved,
   notifyOverdue,
   notifyClosed,
+  notifyTargetDateExtended,
   collectInvolvedEmails,
   sendEmail,
   getOrgUsers,
   getIRTMemberEmails,
+  getAccessToken,
 };

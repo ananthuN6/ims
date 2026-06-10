@@ -3,6 +3,7 @@ import { API_BASE } from '../config';
 
 let _userEmail = null;
 export function setApiUser(email) { _userEmail = email; }
+export function getApiUserEmail() { return _userEmail; }
 
 async function request(path, opts = {}) {
   const headers = {
@@ -28,6 +29,7 @@ export const api = {
 
   // Users (admin)
   getUsers:    ()             => request('/users'),
+  syncUserPhotos: ()          => request('/users/sync-photos', { method: 'POST' }),
   getOrgUsers: ()             => request('/users/org'),
   createUser:  (u)            => request('/users',    { method: 'POST',   body: u }),
   updateUser:  (id, u)        => request(`/users/${id}`, { method: 'PUT', body: u }),
@@ -45,6 +47,7 @@ export const api = {
   approveClosure:  (id)         => request(`/incidents/${id}/approve-closure`,  { method: 'PATCH' }),
   rejectClosure:   (id, data)   => request(`/incidents/${id}/reject-closure`,   { method: 'PATCH', body: data }),
   closeIncident:   (id, data)   => request(`/incidents/${id}/close`,            { method: 'PATCH', body: data }),
+  extendTargetDate:(id, data)   => request(`/incidents/${id}/extend-target-date`, { method: 'PATCH', body: data }),
 
   // Email log
   getEmailLog:   ()           => request('/incidents/emaillog/all'),

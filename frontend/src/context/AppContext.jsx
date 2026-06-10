@@ -1,6 +1,7 @@
 // frontend/src/context/AppContext.jsx
 import React, { createContext, useContext, useReducer, useCallback } from 'react';
 import { api, setApiUser } from '../utils/api';
+import { primePhotoCache } from '../utils/userPhotos';
 
 const Ctx = createContext(null);
 
@@ -56,7 +57,10 @@ export function AppProvider({ children }) {
   const [state, dispatch] = useReducer(reducer, INIT);
 
   const setUser = useCallback((user) => {
-    if (user) setApiUser(user.email);
+    if (user) {
+      setApiUser(user.email);
+      if (user.photoUrl) primePhotoCache(user.email, user.photoUrl);
+    }
     dispatch({ type: 'SET_USER', user });
   }, []);
 
@@ -78,7 +82,11 @@ export function AppProvider({ children }) {
 
   const loadUsers = useCallback(async () => {
     try {
+      await api.syncUserPhotos().catch(() => {});
       const data = await api.getUsers();
+      data.forEach((u) => {
+        if (u.photoUrl) primePhotoCache(u.email, u.photoUrl);
+      });
       dispatch({ type: 'SET_USERS', users: data });
     } catch {}
   }, []);

@@ -4,8 +4,18 @@ const router  = express.Router();
 const { v4: uuidv4 } = require('uuid');
 const { Users } = require('../db/fileDb');
 const { getOrgUsers } = require('../services/emailService');
+const { fetchUserPhotoByEmail, dataUrlToBuffer } = require('../services/graphPhotos');
 const cfg = require('../config');
 const { IRT_ROLE, hasIRTRole } = require('../constants');
+
+async function requireAuth(req, res, next) {
+  const email = req.headers['x-user-email'];
+  if (!email) return res.status(401).json({ error: 'Not authenticated' });
+  const user = await Users.findByEmail(email);
+  if (!user) return res.status(403).json({ error: 'Not authorized' });
+  req.imsUser = user;
+  next();
+}
 
 // ── Middleware: require IRT role ─────────────────────────────
 async function requireIRT(req, res, next) {
@@ -29,13 +39,63 @@ async function requireAdmin(req, res, next) {
   next();
 }
 
+function publicUserRow(u) {
+  return {
+    id: u.id,
+    name: u.name,
+    email: u.email,
+    role: u.role,
+    isAdmin: !!u.isAdmin,
+    createdAt: u.createdAt,
+    hasPhoto: !!u.photoUrl,
+    photoUrl: u.photoUrl || null,
+  };
+}
+
 // GET /api/users  – IRT can list all IMS users
 router.get('/', requireIRT, async (req, res) => {
   const all = await Users.all();
-  res.json(all.map(u => ({
-    id: u.id, name: u.name, email: u.email,
-    role: u.role, isAdmin: !!u.isAdmin, createdAt: u.createdAt,
-  })));
+  res.json(all.map(publicUserRow));
+});
+
+// POST /api/users/sync-photos – pull missing photos from Microsoft Graph
+router.post('/sync-photos', requireIRT, async (req, res) => {
+  const all = await Users.all();
+  let synced = 0;
+  for (const u of all) {
+    if (u.photoUrl) continue;
+    const photoUrl = await fetchUserPhotoByEmail(u.email);
+    if (photoUrl) {
+      await Users.update(u.id, { photoUrl });
+      synced += 1;
+    }
+  }
+  res.json({ synced, total: all.length });
+});
+
+// GET /api/users/photo/:email – profile photo for any IMS user (Microsoft Graph)
+router.get('/photo/:email', requireAuth, async (req, res) => {
+  const email = decodeURIComponent(req.params.email || '').toLowerCase().trim();
+  if (!email) return res.status(400).json({ error: 'email required' });
+
+  let imsUser = await Users.findByEmail(email);
+  let photoUrl = imsUser?.photoUrl || null;
+
+  if (!photoUrl) {
+    photoUrl = await fetchUserPhotoByEmail(email);
+    if (photoUrl && imsUser) {
+      imsUser = await Users.update(imsUser.id, { photoUrl });
+    }
+  }
+
+  if (!photoUrl) return res.status(404).end();
+
+  const parsed = dataUrlToBuffer(photoUrl);
+  if (!parsed) return res.status(404).end();
+
+  res.set('Cache-Control', 'private, max-age=3600');
+  res.type(parsed.contentType);
+  return res.send(parsed.buffer);
 });
 
 // GET /api/users/org – IRT can list all organization users from Azure AD

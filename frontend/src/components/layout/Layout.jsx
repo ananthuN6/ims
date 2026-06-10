@@ -1,10 +1,20 @@
 // frontend/src/components/layout/Layout.jsx
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
 import { useMsal } from '@azure/msal-react';
 import { useApp, useCurrentUser, useMyNotifs } from '../../context/AppContext';
 import { hasIRTRole, isUserAdmin } from '../../constants';
-import { LayoutDashboard, FilePlus, ListChecks, Bell, LogOut, ShieldCheck, X, Menu, Mail, Users } from 'lucide-react';
+import { getStoredTheme, applyTheme } from '../../utils/theme';
+import { UserAvatar } from '../ui';
+import { LayoutDashboard, FilePlus, ListChecks, Bell, LogOut, ShieldCheck, X, Menu, Mail, Users, Sun, Moon, Maximize, Minimize } from 'lucide-react';
+
+function ToolbarButton({ title, onClick, children }) {
+  return (
+    <button type="button" title={title} onClick={onClick} className="layout-toolbar-btn">
+      {children}
+    </button>
+  );
+}
 
 function NavItem({ to, icon: Icon, label, badge }) {
   return (
@@ -12,8 +22,8 @@ function NavItem({ to, icon: Icon, label, badge }) {
       display:'flex', alignItems:'center', gap:10,
       padding:'9px 14px', borderRadius:'var(--radius-sm)',
       fontSize:14, fontWeight:500,
-      background: isActive ? 'rgba(59,130,246,.12)' : 'transparent',
-      borderLeft: isActive ? '2px solid var(--accent-blue)' : '2px solid transparent',
+      background: isActive ? 'var(--nav-active-bg)' : 'transparent',
+      borderLeft: isActive ? '2px solid var(--nav-active-border)' : '2px solid transparent',
       color: isActive ? 'var(--accent-blue)' : 'var(--text-secondary)',
       transition:'all var(--transition)', textDecoration:'none',
     })}>
@@ -33,7 +43,32 @@ export default function Layout({ children }) {
   const navigate = useNavigate();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [notifOpen, setNotifOpen] = useState(false);
+  const [theme, setTheme] = useState(() => getStoredTheme());
+  const [fullscreen, setFullscreen] = useState(() => !!document.fullscreenElement);
   const { dispatch } = useApp();
+
+  useEffect(() => {
+    const onFullscreenChange = () => setFullscreen(!!document.fullscreenElement);
+    document.addEventListener('fullscreenchange', onFullscreenChange);
+    return () => document.removeEventListener('fullscreenchange', onFullscreenChange);
+  }, []);
+
+  const toggleTheme = () => {
+    const next = applyTheme(theme === 'dark' ? 'light' : 'dark');
+    setTheme(next);
+  };
+
+  const toggleFullscreen = async () => {
+    try {
+      if (!document.fullscreenElement) {
+        await document.documentElement.requestFullscreen();
+      } else {
+        await document.exitFullscreen();
+      }
+    } catch {
+      /* browser may block fullscreen */
+    }
+  };
 
   const handleLogout = async () => {
     logout();
@@ -57,7 +92,7 @@ export default function Layout({ children }) {
       {/* Logo */}
       <div style={{ padding:'20px 18px', borderBottom:'1px solid var(--border)' }}>
         <div style={{ display:'flex', alignItems:'center', gap:10 }}>
-          <div style={{ width:32, height:32, borderRadius:8, background:'linear-gradient(135deg,#3b82f6,#6366f1)', display:'flex', alignItems:'center', justifyContent:'center' }}>
+          <div className="ms-logo-tile">
             <ShieldCheck size={18} color="#fff" />
           </div>
           <div>
@@ -74,10 +109,8 @@ export default function Layout({ children }) {
 
       {/* User */}
       <div style={{ padding:12, borderTop:'1px solid var(--border)' }}>
-        <div style={{ display:'flex', alignItems:'center', gap:10, padding:10, borderRadius:'var(--radius-sm)', background:'rgba(255,255,255,.04)' }}>
-          <div style={{ width:32, height:32, borderRadius:'50%', background:'linear-gradient(135deg,#6366f1,#3b82f6)', display:'flex', alignItems:'center', justifyContent:'center', fontSize:13, fontWeight:700, color:'#fff', flexShrink:0 }}>
-            {user?.name?.[0]}
-          </div>
+        <div style={{ display:'flex', alignItems:'center', gap:10, padding:10, borderRadius:'var(--radius-sm)', background:'var(--surface-hover)' }}>
+          <UserAvatar email={user?.email} name={user?.name} size={32} />
           <div style={{ flex:1, minWidth:0 }}>
             <div style={{ fontSize:13, fontWeight:600, color:'var(--text-primary)', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{user?.name}</div>
             <div style={{ fontSize:11, color: isAdmin ? '#fbbf24' : isIRT ? 'var(--accent-cyan)' : 'var(--text-muted)' }}>
@@ -113,9 +146,23 @@ export default function Layout({ children }) {
           <style>{`.mobile-menu-btn{display:none!important}@media(max-width:768px){.mobile-menu-btn{display:flex!important}}`}</style>
           <div style={{ flex:1 }} />
 
+          <div style={{ display:'flex', alignItems:'center', gap:8 }}>
+            <ToolbarButton
+              title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+              onClick={toggleTheme}
+            >
+              {theme === 'dark' ? <Sun size={16} /> : <Moon size={16} />}
+            </ToolbarButton>
+            <ToolbarButton
+              title={fullscreen ? 'Exit full screen' : 'Enter full screen'}
+              onClick={toggleFullscreen}
+            >
+              {fullscreen ? <Minimize size={16} /> : <Maximize size={16} />}
+            </ToolbarButton>
+
           {/* Bell */}
           <div style={{ position:'relative' }}>
-            <button onClick={() => setNotifOpen(o => !o)} style={{ position:'relative', background:'rgba(255,255,255,.05)', border:'1px solid var(--border)', borderRadius:8, padding:'7px 10px', cursor:'pointer', color:'var(--text-secondary)', display:'flex', alignItems:'center' }}>
+            <button onClick={() => setNotifOpen(o => !o)} className="layout-toolbar-btn" style={{ position:'relative' }}>
               <Bell size={16} />
               {unread > 0 && <span style={{ position:'absolute', top:-4, right:-4, background:'var(--accent-rose)', color:'#fff', borderRadius:999, fontSize:10, fontWeight:700, width:16, height:16, display:'flex', alignItems:'center', justifyContent:'center' }}>{unread}</span>}
             </button>
@@ -133,7 +180,7 @@ export default function Layout({ children }) {
                   {notifs.length === 0
                     ? <div style={{ padding:'32px 16px', textAlign:'center', color:'var(--text-muted)', fontSize:13 }}>No notifications</div>
                     : notifs.slice(0, 20).map(n => (
-                        <div key={n.id} onClick={() => dispatch({ type:'MARK_READ', id:n.id })} style={{ padding:'12px 16px', borderBottom:'1px solid var(--border)', background: n.read ? 'transparent' : 'rgba(59,130,246,.05)', cursor:'pointer' }}>
+                        <div key={n.id} onClick={() => dispatch({ type:'MARK_READ', id:n.id })} style={{ padding:'12px 16px', borderBottom:'1px solid var(--border)', background: n.read ? 'transparent' : 'var(--ms-brand-subtle)', cursor:'pointer' }}>
                           <div style={{ fontSize:13, color: n.read ? 'var(--text-secondary)' : 'var(--text-primary)', marginBottom:3 }}>{n.message}</div>
                           <div style={{ fontSize:11, color:'var(--text-muted)' }}>{n.ts?.slice(0,16).replace('T',' ')}</div>
                         </div>
@@ -142,6 +189,7 @@ export default function Layout({ children }) {
                 </div>
               </div>
             )}
+          </div>
           </div>
         </header>
 

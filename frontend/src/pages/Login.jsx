@@ -60,12 +60,11 @@ export default function Login() {
     <div style={{
       minHeight:'100vh', display:'flex', alignItems:'center', justifyContent:'center',
       background:'var(--bg-primary)', padding:24,
-      backgroundImage:'radial-gradient(ellipse 100% 60% at 50% 0%,rgba(59,130,246,.08) 0%,transparent 60%)',
     }}>
       <div style={{ width:'100%', maxWidth:400 }} className="animate-fade-up">
         {/* Logo */}
         <div style={{ textAlign:'center', marginBottom:32 }}>
-          <div style={{ width:56, height:56, borderRadius:16, margin:'0 auto 14px', background:'linear-gradient(135deg,#3b82f6,#6366f1)', display:'flex', alignItems:'center', justifyContent:'center', boxShadow:'0 0 40px rgba(59,130,246,.25)' }}>
+          <div className="ms-logo-tile ms-logo-tile--lg" style={{ margin:'0 auto 14px' }}>
             <ShieldCheck size={28} color="#fff" />
           </div>
           <h1 style={{ fontSize:24, fontWeight:700, color:'var(--text-primary)', letterSpacing:'-0.03em' }}>Incident Management</h1>
@@ -73,24 +72,15 @@ export default function Login() {
         </div>
 
         {/* Card */}
-        <div style={{ background:'var(--bg-card)', border:'1px solid var(--border)', borderRadius:'var(--radius-xl)', padding:28, boxShadow:'0 0 40px rgba(0,0,0,.3)' }}>
+        <div style={{ background:'var(--bg-card)', border:'1px solid var(--border)', borderRadius:'var(--radius-lg)', padding:28, boxShadow:'var(--shadow-lg)' }}>
 
           {error && (
-            <div style={{ marginBottom:20, padding:'12px 14px', borderRadius:8, background:'rgba(244,63,94,.1)', border:'1px solid rgba(244,63,94,.3)', fontSize:13, color:'#fb7185', lineHeight:1.5 }}>
+            <div style={{ marginBottom:20, padding:'12px 14px', borderRadius:'var(--radius-sm)', background:'var(--ms-danger-subtle)', border:'1px solid var(--ms-danger)', fontSize:13, color:'var(--ms-danger)', lineHeight:1.5 }}>
               {error}
             </div>
           )}
 
-          <button onClick={handleLogin} disabled={loading} style={{
-            width:'100%', display:'flex', alignItems:'center', justifyContent:'center', gap:12,
-            padding:'13px 20px', borderRadius:10, border:'1px solid var(--border)',
-            background:'rgba(255,255,255,.05)', color:'var(--text-primary)',
-            fontSize:15, fontWeight:600, cursor:loading ? 'not-allowed' : 'pointer',
-            transition:'all var(--transition)', opacity: loading ? .7 : 1,
-          }}
-            onMouseEnter={e => { if (!loading) e.currentTarget.style.background='rgba(255,255,255,.09)'; }}
-            onMouseLeave={e => { e.currentTarget.style.background='rgba(255,255,255,.05)'; }}
-          >
+          <button onClick={handleLogin} disabled={loading} className="ms-sign-in-btn">
             {loading ? <Spinner size={20} /> : (
               /* Microsoft logo SVG */
               <svg width="20" height="20" viewBox="0 0 21 21" fill="none" xmlns="http://www.w3.org/2000/svg">

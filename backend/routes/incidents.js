@@ -5,13 +5,11 @@ const { v4: uuidv4 } = require('uuid');
 const { Users, Incidents, EmailLog } = require('../db/fileDb');
 const email = require('../services/emailService');
 const { runDailyReminders } = require('../services/reminderService');
-const { addBusinessDays, addBusinessHours } = require('../utils/businessDays');
 const {
-  STATUS_PENDING_IRT_CLOSURE,
   STATUS_PENDING_CLOSURE_APPROVAL,
-  PENDING_CLOSURE_STATUSES,
+  SEVERITY_OPTIONS,
+  EXTEND_TARGET_STATUSES,
   hasIRTRole,
-  isPendingIRTClosure,
 } = require('../constants');
 
 // ── Auth helpers ─────────────────────────────────────────────
@@ -60,6 +58,24 @@ function hasRcaSubmitted(inc) {
 
 function isPendingRcaApproval(status) {
   return ['Pending Admin Approval', 'Overdue'].includes(status);
+}
+
+function isOwnerUser(inc, user) {
+  const userEmail = user.email?.toLowerCase();
+  const userName = user.name?.toLowerCase();
+  const ownerEmail = inc.ownerEmail?.toLowerCase();
+  const ownerName = inc.ownerName?.toLowerCase();
+  return user.id === inc.ownerId
+    || (ownerEmail && userEmail === ownerEmail)
+    || (!inc.ownerId && ownerName && userName === ownerName);
+}
+
+function statusAfterTargetExtension(inc) {
+  if (['Closed', 'Rejected', 'Submitted'].includes(inc.status)) return inc.status;
+  if (inc.status === STATUS_PENDING_CLOSURE_APPROVAL) return inc.status;
+  if (inc.status === 'Admin Approved') return 'Admin Approved';
+  if (hasRcaSubmitted(inc)) return 'Pending Admin Approval';
+  return 'Assigned';
 }
 
 function appendLog(inc, entry) {
@@ -139,7 +155,7 @@ router.post('/', requireAuth, async (req, res) => {
         comment: 'Incident submitted', at: new Date().toISOString(),
       }],
       validationStatus: null, severity: null, ownerId: null, ownerName: null, ownerEmail: null, isoComments: null,
-      rca: '', correction: '', correctiveAction: '', targetDate: '', closureAttachments: [],
+      rca: '', correction: '', correctiveAction: '', targetDate: '', targetDateHistory: [], closureAttachments: [],
       lessonsLearned: '', closedDate: '', reviewDate: '', reviewedBy: '',
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
@@ -167,6 +183,9 @@ router.patch('/:id/validate', requireIRT, async (req, res) => {
     if (validationStatus === 'Valid' && (!severity || (!ownerId && !ownerEmail))) {
       return res.status(400).json({ error: 'severity and ownerId or ownerEmail required for valid incidents' });
     }
+    if (validationStatus === 'Valid' && !SEVERITY_OPTIONS.includes(severity)) {
+      return res.status(400).json({ error: 'severity must be Critical, High, or Medium' });
+    }
 
     let owner = ownerId ? await Users.findById(ownerId) : null;
     if (!owner && ownerEmail) {
@@ -185,17 +204,6 @@ router.patch('/:id/validate', requireIRT, async (req, res) => {
     }
 
     const newStatus = validationStatus === 'Valid' ? 'Assigned' : 'Rejected';
-    let targetDate = inc.targetDate || '';
-    let responseDeadline = null;
-    if (validationStatus === 'Valid') {
-      if (severity === 'High') {
-        targetDate = addBusinessDays(new Date(), 2);
-        responseDeadline = addBusinessHours(new Date(), 4);
-      } else if (severity === 'Medium') {
-        targetDate = addBusinessDays(new Date(), 5);
-        responseDeadline = addBusinessHours(new Date(), 8);
-      }
-    }
 
     const updated = await Incidents.update(inc.id, {
       validationStatus,
@@ -205,8 +213,6 @@ router.patch('/:id/validate', requireIRT, async (req, res) => {
       ownerName: owner?.name || ownerName || ownerEmail || null,
       isoComments: isoComments || null,
       status: newStatus,
-      targetDate,
-      responseDeadline,
       responseNotifiedAt: null,
       responseSubmittedAt: null,
       validationReminderDate: null,
@@ -259,7 +265,7 @@ router.patch('/:id/closure', requireAuth, async (req, res) => {
       return res.status(400).json({ error: 'rca, correction, correctiveAction, and targetDate are required' });
     }
 
-    const finalStatus = isPastTargetDate(targetDate) ? 'Overdue' : 'Pending Admin Approval';
+    const finalStatus = 'Pending Admin Approval';
     const ownerPatch = {};
     if (isOwner) {
       if (!inc.ownerId) ownerPatch.ownerId = req.imsUser.id;
@@ -290,6 +296,70 @@ router.patch('/:id/closure', requireAuth, async (req, res) => {
     res.json(updated);
   } catch (err) {
     console.error('[Incidents] closure error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// PATCH /api/incidents/:id/extend-target-date — owner extends past target date with remark
+router.patch('/:id/extend-target-date', requireAuth, async (req, res) => {
+  try {
+    const inc = await Incidents.findById(req.params.id);
+    if (!inc) return res.status(404).json({ error: 'Not found' });
+    if (!isOwnerUser(inc, req.imsUser)) {
+      return res.status(403).json({ error: 'Only the assigned owner can extend the target date' });
+    }
+    if (!EXTEND_TARGET_STATUSES.includes(inc.status)) {
+      return res.status(409).json({ error: 'Target date cannot be extended for this incident status' });
+    }
+    if (!inc.targetDate || !isPastTargetDate(inc.targetDate)) {
+      return res.status(409).json({ error: 'Target date can only be extended after the current target date has passed' });
+    }
+
+    const { newTargetDate, remark } = req.body;
+    if (!newTargetDate) return res.status(400).json({ error: 'newTargetDate is required' });
+    if (!remark?.trim()) return res.status(400).json({ error: 'remark is required' });
+
+    const today = new Date().toISOString().slice(0, 10);
+    if (newTargetDate < today) {
+      return res.status(400).json({ error: 'New target date must be today or later' });
+    }
+
+    const historyEntry = {
+      id: uuidv4(),
+      previousDate: inc.targetDate,
+      newDate: newTargetDate,
+      remark: remark.trim(),
+      by: req.imsUser.name,
+      byEmail: req.imsUser.email,
+      at: new Date().toISOString(),
+    };
+
+    const updated = await Incidents.update(inc.id, {
+      targetDate: newTargetDate,
+      status: statusAfterTargetExtension(inc),
+      targetDateHistory: [...(inc.targetDateHistory || []), historyEntry],
+      actionLog: appendLog(inc, {
+        id: uuidv4(),
+        action: 'Target Date Extended',
+        fromStatus: inc.status,
+        toStatus: statusAfterTargetExtension(inc),
+        by: req.imsUser.name,
+        byEmail: req.imsUser.email,
+        role: req.imsUser.role,
+        comment: `${inc.targetDate} → ${newTargetDate}: ${remark.trim()}`,
+        at: new Date().toISOString(),
+      }),
+    });
+
+    email.notifyTargetDateExtended(updated, {
+      actorEmail: req.imsUser.email,
+      remark: remark.trim(),
+      previousDate: inc.targetDate,
+    }).catch(console.error);
+
+    res.json(updated);
+  } catch (err) {
+    console.error('[Incidents] extend-target-date error:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
@@ -448,9 +518,7 @@ router.patch('/:id/close', requireAuth, async (req, res) => {
     const normalizedUserName  = req.imsUser.name?.toLowerCase();
     const ownerEmail = inc.ownerEmail?.toLowerCase();
     const ownerName  = inc.ownerName?.toLowerCase();
-    const isOwner = req.imsUser.id === inc.ownerId
-      || (ownerEmail && normalizedUserEmail === ownerEmail)
-      || (!inc.ownerId && ownerName && normalizedUserName === ownerName);
+    const isOwner = isOwnerUser(inc, req.imsUser);
     if (!isOwner) return res.status(403).json({ error: 'Only the assigned owner can close the incident at this stage' });
 
     const { closedDate, reviewDate, reviewedBy, lessonsLearned } = req.body;

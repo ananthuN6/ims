@@ -3,7 +3,8 @@
 import React, { useState, useEffect } from 'react';
 import { useApp, useCurrentUser } from '../context/AppContext';
 import { api } from '../utils/api';
-import { Card, Button, Input, Select, FormField, Toast, EmptyState, Spinner } from '../components/ui';
+import { primePhotoCache } from '../utils/userPhotos';
+import { Card, Button, Input, Select, FormField, Toast, EmptyState, Spinner, UserAvatar } from '../components/ui';
 import { Users, UserPlus, Pencil, Trash2, ShieldCheck, User } from 'lucide-react';
 
 import { ROLE_LABELS, IRT_ROLE, LEGACY_IRT_ROLE } from '../constants';
@@ -17,13 +18,16 @@ function UserRow({ user, onEdit, onDelete, currentUserId }) {
       onMouseEnter={e => e.currentTarget.style.background='var(--bg-card-hover)'}
       onMouseLeave={e => e.currentTarget.style.background='transparent'}
     >
-      <div>
-        <div style={{ fontSize:14, fontWeight:500, color:'var(--text-primary)', display:'flex', alignItems:'center', gap:8 }}>
+      <div style={{ display:'flex', alignItems:'center', gap:12, minWidth:0 }}>
+        <UserAvatar email={user.email} name={user.name} size={36} />
+        <div style={{ minWidth:0 }}>
+        <div style={{ fontSize:14, fontWeight:500, color:'var(--text-primary)', display:'flex', alignItems:'center', gap:8, flexWrap:'wrap' }}>
           {user.name}
           {user.isAdmin && <span style={{ fontSize:10, background:'rgba(245,158,11,.15)', color:'#fbbf24', border:'1px solid rgba(245,158,11,.3)', borderRadius:999, padding:'1px 7px', fontWeight:600 }}>ADMIN</span>}
-          {isSelf && <span style={{ fontSize:10, background:'rgba(59,130,246,.15)', color:'#60a5fa', borderRadius:999, padding:'1px 7px', fontWeight:600 }}>YOU</span>}
+          {isSelf && <span style={{ fontSize:10, background:'var(--ms-brand-subtle)', color:'var(--accent-blue)', borderRadius:999, padding:'1px 7px', fontWeight:600 }}>YOU</span>}
         </div>
         <div style={{ fontSize:12, color:'var(--text-muted)', marginTop:2 }}>{user.email}</div>
+        </div>
       </div>
       <span style={{ fontSize:13, color: ROLE_COLORS[user.role] || 'var(--text-secondary)' }}>{ROLE_LABELS[user.role] || user.role}</span>
       <span style={{ fontSize:12, color:'var(--text-muted)' }}>{user.createdAt?.slice(0,10) || '—'}</span>
@@ -63,12 +67,18 @@ export default function Admin() {
     setLoading(true);
     try {
       const data = await api.getUsers();
+      data.forEach((u) => { if (u.photoUrl) primePhotoCache(u.email, u.photoUrl); });
       setUsers(data);
     } catch (e) { showToast(e.message, 'error'); }
     finally { setLoading(false); }
   };
 
-  useEffect(() => { fetchUsers(); }, []);
+  useEffect(() => {
+    (async () => {
+      try { await api.syncUserPhotos(); } catch { /* Graph may be unavailable */ }
+      fetchUsers();
+    })();
+  }, []);
 
   const openCreate = () => { setEditing(null); setForm(EMPTY_FORM); setShowForm(true); };
   const openEdit   = (u) => { setEditing(u); setForm({ name:u.name, email:u.email, role:u.role }); setShowForm(true); };
@@ -140,9 +150,9 @@ export default function Admin() {
       {/* Stats */}
       <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit,minmax(140px,1fr))', gap:16, marginBottom:24 }}>
         {[
-          { label:'Total Users', value:users.length, color:'#3b82f6' },
-          { label:'IRT',    value:irtCount,      color:'#06b6d4' },
-          { label:'Employees',   value:empCount,      color:'#8b5cf6' },
+          { label:'Total Users', value:users.length, color:'var(--ms-brand)' },
+          { label:'IRT',    value:irtCount,      color:'var(--accent-cyan)' },
+          { label:'Employees',   value:empCount,      color:'var(--ms-purple)' },
         ].map(s => (
           <Card key={s.label} style={{ padding:'16px 20px' }}>
             <div style={{ fontSize:12, color:'var(--text-muted)', marginBottom:8, fontWeight:500 }}>{s.label}</div>
@@ -153,7 +163,7 @@ export default function Admin() {
 
       {/* Add / Edit form */}
       {showForm && (
-        <Card style={{ marginBottom:24, border:'1px solid rgba(59,130,246,.25)' }}>
+        <Card style={{ marginBottom:24, border:'1px solid var(--ms-brand)' }}>
           <h3 style={{ fontWeight:600, fontSize:15, marginBottom:16 }}>
             {editing ? `Edit: ${editing.name}` : '➕ Add New User'}
           </h3>

@@ -5,7 +5,7 @@ import { useNavigate } from 'react-router-dom';
 import { useApp, useCurrentUser } from '../context/AppContext';
 import { api } from '../utils/api';
 import { fileToBase64 } from '../utils';
-import { Card, FormField, Input, Textarea, Button, Toast } from '../components/ui';
+import { Card, FormField, Input, Textarea, Button, Toast, UserIdentity } from '../components/ui';
 import { FilePlus, Paperclip, X } from 'lucide-react';
 
 export default function ReportIncident() {
@@ -28,7 +28,7 @@ export default function ReportIncident() {
   const validate = () => {
     const e = {};
     if (!form.description.trim()) e.description = 'Description is required';
-    if (!form.incidentDate) e.incidentDate = 'Date is required';
+    if (!form.incidentDate) e.incidentDate = 'Report date is required';
     return e;
   };
 
@@ -72,12 +72,16 @@ export default function ReportIncident() {
                 style={{ color: nextIncidentId ? 'var(--accent-cyan)' : 'var(--text-muted)', fontFamily: 'var(--font-mono)', fontSize: 13 }}
               />
             </FormField>
-            <FormField label="Reported By"><Input value={user?.name} disabled style={{ color:'var(--text-secondary)' }} /></FormField>
+            <FormField label="Reported By">
+              <div style={{ padding:'8px 12px', background:'var(--bg-input)', border:'1px solid var(--border)', borderRadius:'var(--radius-sm)' }}>
+                <UserIdentity email={user?.email} name={user?.name} size={28} showEmail />
+              </div>
+            </FormField>
           </div>
-          <FormField label="Incident Date" required error={errors.incidentDate}>
+          <FormField label="Incident Report Date" required error={errors.incidentDate}>
             <Input type="date" value={form.incidentDate} onChange={e => setForm(f => ({ ...f, incidentDate:e.target.value }))} max={new Date().toISOString().slice(0,10)} />
           </FormField>
-          <FormField label="Incident Description" required error={errors.description} hint="Describe what happened, when, and the potential impact.">
+          <FormField label="Incident Description" required error={errors.description}>
             <Textarea rows={6} value={form.description} onChange={e => setForm(f => ({ ...f, description:e.target.value }))} placeholder="Provide a clear and detailed description of the incident..." />
           </FormField>
           <FormField label="Attachments" hint="Attach any relevant files, screenshots, or documents.">
@@ -92,9 +96,9 @@ export default function ReportIncident() {
               {attachments.length > 0 && (
                 <div style={{ marginTop:12, display:'flex', flexWrap:'wrap', gap:8 }}>
                   {attachments.map((att,i) => (
-                    <div key={i} style={{ display:'flex', alignItems:'center', gap:6, background:'rgba(59,130,246,.1)', border:'1px solid rgba(59,130,246,.2)', borderRadius:6, padding:'4px 10px', fontSize:12, color:'#60a5fa' }}>
+                    <div key={i} style={{ display:'flex', alignItems:'center', gap:6, background:'var(--ms-brand-subtle)', border:'1px solid var(--ms-brand)', borderRadius:'var(--radius-sm)', padding:'4px 10px', fontSize:12, color:'var(--accent-blue)' }}>
                       <Paperclip size={11} /> <span>{att.name}</span>
-                      <button type="button" onClick={() => setAttachments(p => p.filter((_,j) => j!==i))} style={{ background:'none', border:'none', cursor:'pointer', color:'#60a5fa', display:'flex', padding:0 }}><X size={11} /></button>
+                      <button type="button" onClick={() => setAttachments(p => p.filter((_,j) => j!==i))} style={{ background:'none', border:'none', cursor:'pointer', color:'var(--accent-blue)', display:'flex', padding:0 }}><X size={11} /></button>
                     </div>
                   ))}
                 </div>

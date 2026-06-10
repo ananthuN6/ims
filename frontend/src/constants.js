@@ -9,6 +9,10 @@ export const STATUS_PENDING_RCA_APPROVAL = 'Pending Admin Approval';
 export const STATUS_RCA_APPROVED = 'Admin Approved';
 export const STATUS_PENDING_CLOSURE_APPROVAL = 'Pending Closure Approval';
 
+export const SEVERITY_OPTIONS = ['Critical', 'High', 'Medium'];
+
+export const VALIDATION_FILTER_OPTIONS = ['Valid', 'Invalid'];
+
 export const INCIDENT_STATUSES = [
   'Submitted',
   'Assigned',
@@ -61,7 +65,19 @@ export function displayAction(action) {
   if (action === 'Closure Approved') return 'Closure Approved';
   if (action === 'Closure Rejected') return 'Closure Rejected';
   if (action === 'RCA Rejected') return 'RCA Rejected';
+  if (action === 'Target Date Extended') return 'Target Date Extended';
   return action;
+}
+
+export function isPastTargetDate(targetDate) {
+  if (!targetDate) return false;
+  return targetDate < new Date().toISOString().slice(0, 10);
+}
+
+export function canExtendTargetDate(incident) {
+  if (!incident?.targetDate || !isPastTargetDate(incident.targetDate)) return false;
+  if (['Closed', 'Rejected', 'Submitted'].includes(incident.status)) return false;
+  return ['Assigned', 'Overdue', 'Pending Admin Approval', STATUS_RCA_APPROVED, STATUS_PENDING_CLOSURE_APPROVAL].includes(incident.status);
 }
 
 export function hasRcaSubmitted(incident) {

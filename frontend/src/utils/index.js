@@ -13,8 +13,8 @@ export const fileToBase64 = (file) => new Promise((res, rej) => {
   r.readAsDataURL(file);
 });
 
-/** IMS accent-blue (#3b82f6) — Excel "Accent 1" style reference */
-const HEADER_FILL = 'FF3B82F6';
+/** Microsoft brand blue (#0078d4) — Excel header */
+const HEADER_FILL = 'FF0078D4';
 const HEADER_FONT = 'FFFFFFFF';
 
 const EXPORT_HEADERS = [
@@ -129,6 +129,40 @@ export async function exportToExcel(incidents, users = []) {
 
 export const isRejectedIncident = (inc) =>
   inc.status === 'Rejected' || inc.validationStatus === 'Invalid';
+
+export function lookupUserEmail(users, { id, email, name } = {}) {
+  if (email) return String(email).toLowerCase().trim();
+  if (id && users?.length) {
+    const u = users.find((x) => x.id === id);
+    if (u?.email) return u.email.toLowerCase();
+  }
+  if (name && users?.length) {
+    const normalized = String(name).toLowerCase().trim();
+    const u = users.find((x) => x.name?.toLowerCase() === normalized);
+    if (u?.email) return u.email.toLowerCase();
+  }
+  return null;
+}
+
+export function reporterEmailFromIncident(inc, users) {
+  return lookupUserEmail(users, {
+    id: inc.reportedBy,
+    email: inc.reportedByEmail,
+    name: inc.reportedByName,
+  });
+}
+
+export function ownerEmailFromIncident(inc, users) {
+  return lookupUserEmail(users, {
+    id: inc.ownerId,
+    email: inc.ownerEmail,
+    name: inc.ownerName,
+  });
+}
+
+export function emailFromPerson(users, { email, name } = {}) {
+  return lookupUserEmail(users, { email, name });
+}
 
 export const getVisibleIncidents = (incidents, user) => {
   if (!user) return [];

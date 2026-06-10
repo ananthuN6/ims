@@ -4,12 +4,11 @@ import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useApp, useCurrentUser } from '../context/AppContext';
 import { api } from '../utils/api';
-import {
-  hasIRTRole, displayAction, canOwnerClose, canReviewRca, canReviewClosure,
+import { hasIRTRole, displayAction, canOwnerClose, canReviewRca, canReviewClosure, canExtendTargetDate, SEVERITY_OPTIONS,
   STATUS_PENDING_CLOSURE_APPROVAL, STATUS_RCA_APPROVED,
 } from '../constants';
-import { formatDate, formatDateTime, fileToBase64 } from '../utils';
-import { StatusBadge, SeverityBadge, FormField, Input, Textarea, Select, Button, Toast, Spinner } from '../components/ui';
+import { formatDate, formatDateTime, fileToBase64, reporterEmailFromIncident, ownerEmailFromIncident, emailFromPerson } from '../utils';
+import { StatusBadge, SeverityBadge, FormField, Input, Textarea, Select, Button, Toast, Spinner, UserAvatar, UserIdentity } from '../components/ui';
 import { ArrowLeft, Paperclip, X, CheckCircle, XCircle, Lock, ChevronDown, ChevronUp } from 'lucide-react';
 
 function InfoRow({ label, value, mono, span }) {
@@ -28,6 +27,23 @@ function MetaChip({ label, value }) {
       <span className="incident-meta-chip__value">{value || '—'}</span>
     </div>
   );
+}
+
+function PersonMetaChip({ label, name, email }) {
+  return (
+    <div className="incident-meta-chip" style={{ paddingLeft:4 }}>
+      <span className="incident-meta-chip__label">{label}</span>
+      <div style={{ display:'flex', alignItems:'center', gap:6 }}>
+        <UserAvatar email={email} name={name} size={22} />
+        <span className="incident-meta-chip__value">{name || '—'}</span>
+      </div>
+    </div>
+  );
+}
+
+function PersonLine({ name, email, users, size = 20 }) {
+  const resolvedEmail = email || emailFromPerson(users, { name, email });
+  return <UserIdentity email={resolvedEmail} name={name || email} size={size} />;
 }
 
 function Panel({ title, badge, children, style, className = '' }) {
@@ -49,7 +65,7 @@ function AttachmentList({ attachments=[] }) {
   return (
     <div style={{ display:'flex', flexWrap:'wrap', gap:8 }}>
       {attachments.map((att,i) => (
-        <a key={i} href={att.data} download={att.name} style={{ display:'flex', alignItems:'center', gap:6, background:'rgba(59,130,246,.1)', border:'1px solid rgba(59,130,246,.2)', borderRadius:6, padding:'5px 10px', fontSize:12, color:'#60a5fa', textDecoration:'none' }}>
+        <a key={i} href={att.data} download={att.name} style={{ display:'flex', alignItems:'center', gap:6, background:'var(--ms-brand-subtle)', border:'1px solid var(--ms-brand)', borderRadius:'var(--radius-sm)', padding:'5px 10px', fontSize:12, color:'var(--accent-blue)', textDecoration:'none' }}>
           <Paperclip size={11} /> {att.name}
         </a>
       ))}
@@ -77,7 +93,7 @@ function WorkflowBar({ incident }) {
 
   if (s === 'Rejected') {
     return (
-      <div style={{ padding:'10px 14px', borderRadius:8, background:'rgba(244,63,94,.1)', border:'1px solid rgba(244,63,94,.3)', fontSize:13, color:'#fb7185' }}>
+      <div style={{ padding:'10px 14px', borderRadius:'var(--radius-sm)', background:'var(--ms-danger-subtle)', border:'1px solid var(--ms-danger)', fontSize:13, color:'var(--ms-danger)' }}>
         Incident rejected at validation
       </div>
     );
@@ -153,6 +169,7 @@ export default function IncidentDetail() {
   const [closeForm, setCloseForm] = useState({ closedDate:new Date().toISOString().slice(0,10), reviewDate:'', reviewedBy: user?.name||'', lessonsLearned:'' });
   const [rejectComment, setRejectComment] = useState('');
   const [rejectMode, setRejectMode] = useState(null); // 'rca' | 'closure'
+  const [extendForm, setExtendForm] = useState({ newTargetDate:'', remark:'' });
   const [openSections, setOpenSections] = useState({
     details: true,
     history: false,
@@ -195,6 +212,16 @@ export default function IncidentDetail() {
     const needsOwnerRca = ['Assigned', 'Overdue'].includes(incident.status);
     const needsFinalClose = canOwnerClose(incident);
     const needsIrtActions = canReviewRca(incident) || canReviewClosure(incident);
+    const needsExtendTarget = (() => {
+      const ownerEmail = incident.ownerEmail?.toLowerCase();
+      const ownerName = incident.ownerName?.toLowerCase();
+      const userEmail = user?.email?.toLowerCase();
+      const userName = user?.name?.toLowerCase();
+      const isOwnerUser = user?.id === incident.ownerId
+        || (ownerEmail && userEmail === ownerEmail)
+        || (!incident.ownerId && ownerName && userName === ownerName);
+      return isOwnerUser && canExtendTargetDate(incident);
+    })();
     setOpenSections({
       details: true,
       history: false,
@@ -205,8 +232,9 @@ export default function IncidentDetail() {
       closed: incident.status === 'Closed',
       irtActions: needsIrtActions,
       pendingClosure: incident.status === STATUS_PENDING_CLOSURE_APPROVAL,
+      extendTarget: needsExtendTarget,
     });
-  }, [incident?.id, incident?.status]);
+  }, [incident?.id, incident?.status, user?.id, user?.email, user?.name]);
 
   if (loading) return <div style={{ display:'flex', justifyContent:'center', padding:80 }}><Spinner size={32} /></div>;
   if (!incident) return <div style={{ textAlign:'center', padding:80, color:'var(--text-muted)' }}>Incident not found</div>;
@@ -247,10 +275,12 @@ export default function IncidentDetail() {
   const showClosureReview    = isIRT && canReviewClosure(incident);
   const showPendingClosure   = incident.status === STATUS_PENDING_CLOSURE_APPROVAL && incident.closedDate;
   const showIrtActions       = showRcaReview || showClosureReview;
+  const showTargetDateExtend = isOwner && canExtendTargetDate(incident);
   const showValidationFacts  = incident.validationStatus && !showIRTValidate;
   const showRcaFacts         = incident.rca && !showOwnerClosure;
   const showOverviewFacts    = showValidationFacts || showRcaFacts || showPendingClosure
-    || (incident.status === 'Closed' && incident.closedDate);
+    || (incident.status === 'Closed' && incident.closedDate)
+    || (incident.targetDateHistory?.length > 0);
 
   const refresh = async () => {
     const data = await api.getIncident(id);
@@ -356,6 +386,24 @@ export default function IncidentDetail() {
     finally { setSubmitting(false); }
   };
 
+  const handleExtendTargetDate = async (e) => {
+    e.preventDefault();
+    if (!extendForm.newTargetDate) { setToast({ message:'New target date is required', type:'error' }); return; }
+    if (!extendForm.remark.trim()) { setToast({ message:'Remark is required', type:'error' }); return; }
+    setSubmitting(true);
+    try {
+      await api.extendTargetDate(id, {
+        newTargetDate: extendForm.newTargetDate,
+        remark: extendForm.remark.trim(),
+      });
+      dispatch({ type:'ADD_NOTIF', message:`Target date extended for ${incident.incidentId}` });
+      setToast({ message:'Target date updated. IRT and owner notified by email.', type:'success' });
+      setExtendForm({ newTargetDate:'', remark:'' });
+      await refresh();
+    } catch (err) { setToast({ message: err.message, type:'error' }); }
+    finally { setSubmitting(false); }
+  };
+
   const addClosureFile = async (e) => {
     const converted = await Promise.all(Array.from(e.target.files).map(fileToBase64));
     setClosureAtts(prev => [...prev, ...converted]);
@@ -376,8 +424,16 @@ export default function IncidentDetail() {
           {incident.severity && <SeverityBadge severity={incident.severity} />}
         </div>
         <div className="incident-meta-chips">
-          <MetaChip label="Reported by" value={incident.reportedByName} />
-          <MetaChip label="Owner" value={owner?.name || incident.ownerName} />
+          <PersonMetaChip
+            label="Reported by"
+            name={incident.reportedByName}
+            email={reporterEmailFromIncident(incident, allUsers)}
+          />
+          <PersonMetaChip
+            label="Owner"
+            name={owner?.name || incident.ownerName}
+            email={owner?.email || ownerEmailFromIncident(incident, allUsers)}
+          />
           <MetaChip label="Incident date" value={formatDate(incident.incidentDate)} />
           <MetaChip label="Updated" value={formatDateTime(incident.updatedAt).slice(0, 16)} />
         </div>
@@ -433,6 +489,29 @@ export default function IncidentDetail() {
                 )}
               </div>
             )}
+            {incident.targetDateHistory?.length > 0 && (
+              <div className="incident-subpanel">
+                <div className="incident-subpanel__head">
+                  <span className="incident-subpanel__title">Target date history</span>
+                </div>
+                <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
+                  {[...(incident.targetDateHistory || [])].reverse().map(entry => (
+                    <div key={entry.id} style={{ padding:'8px 10px', background:'var(--bg-input)', border:'1px solid var(--border)', borderRadius:6, fontSize:12 }}>
+                      <div style={{ display:'flex', justifyContent:'space-between', gap:8, marginBottom:4, flexWrap:'wrap' }}>
+                        <span style={{ fontWeight:600, color:'var(--text-primary)' }}>
+                          {formatDate(entry.previousDate)} → {formatDate(entry.newDate)}
+                        </span>
+                        <span style={{ color:'var(--text-muted)', whiteSpace:'nowrap' }}>{formatDateTime(entry.at).slice(0, 16)}</span>
+                      </div>
+                      <div style={{ marginBottom:6 }}>
+                        <PersonLine name={entry.by} email={entry.byEmail} users={allUsers} size={20} />
+                      </div>
+                      <div style={{ color:'var(--text-secondary)', lineHeight:1.45 }}>{entry.remark}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
             {showPendingClosure && (
               <div className="incident-subpanel incident-subpanel--warn">
                 <div className="incident-subpanel__head">
@@ -440,7 +519,10 @@ export default function IncidentDetail() {
                 </div>
                 <div className="incident-info-grid">
                   <InfoRow label="Closed" value={formatDate(incident.closedDate)} />
-                  <InfoRow label="Closed by" value={incident.reviewedBy} />
+                  <div style={{ display:'flex', flexDirection:'column', gap:2 }}>
+                    <span style={{ fontSize:10, color:'var(--text-muted)', fontWeight:600, letterSpacing:'0.06em', textTransform:'uppercase' }}>Closed by</span>
+                    <PersonLine name={incident.reviewedBy} users={allUsers} size={22} />
+                  </div>
                   <InfoRow label="Lessons" value={incident.lessonsLearned} span={2} />
                 </div>
               </div>
@@ -449,11 +531,14 @@ export default function IncidentDetail() {
               <div className="incident-subpanel incident-subpanel--valid">
                 <div className="incident-subpanel__head">
                   <span className="incident-subpanel__title">Incident closed</span>
-                  <CheckCircle size={14} color="#10b981" />
+                  <CheckCircle size={14} color="var(--ms-success)" />
                 </div>
                 <div className="incident-info-grid">
                   <InfoRow label="Closed" value={formatDate(incident.closedDate)} />
-                  <InfoRow label="Closed by" value={incident.reviewedBy} />
+                  <div style={{ display:'flex', flexDirection:'column', gap:2 }}>
+                    <span style={{ fontSize:10, color:'var(--text-muted)', fontWeight:600, letterSpacing:'0.06em', textTransform:'uppercase' }}>Closed by</span>
+                    <PersonLine name={incident.reviewedBy} users={allUsers} size={22} />
+                  </div>
                   <InfoRow label="Lessons" value={incident.lessonsLearned} span={2} />
                 </div>
               </div>
@@ -483,7 +568,7 @@ export default function IncidentDetail() {
               <FormField label="Severity" required={isoForm.validationStatus==='Valid'}>
                 <Select value={isoForm.severity} onChange={e => setIsoForm(f => ({ ...f, severity:e.target.value }))}>
                   <option value="">Select…</option>
-                  <option>High</option><option>Medium</option><option>Low</option>
+                  {SEVERITY_OPTIONS.map(s => <option key={s}>{s}</option>)}
                 </Select>
               </FormField>
             </div>
@@ -569,7 +654,7 @@ export default function IncidentDetail() {
                 </FormField>
               </div>
               <div className="incident-form-grid-3">
-              <FormField label="Target Date">
+              <FormField label="Target Date" required hint="Set by owner when submitting RCA. Can be extended with a remark after the date passes.">
                 <Input type="date" value={ownerForm.targetDate} onChange={e => setOwnerForm(f => ({ ...f, targetDate:e.target.value }))} />
               </FormField>
               </div>
@@ -585,9 +670,9 @@ export default function IncidentDetail() {
                   {closureAtts.length > 0 && (
                     <div style={{ marginTop:10, display:'flex', flexWrap:'wrap', gap:8 }}>
                       {closureAtts.map((att,i) => (
-                        <div key={i} style={{ display:'flex', alignItems:'center', gap:6, background:'rgba(16,185,129,.1)', border:'1px solid rgba(16,185,129,.2)', borderRadius:6, padding:'4px 10px', fontSize:12, color:'#34d399' }}>
+                        <div key={i} style={{ display:'flex', alignItems:'center', gap:6, background:'var(--ms-success-subtle)', border:'1px solid var(--ms-success)', borderRadius:'var(--radius-sm)', padding:'4px 10px', fontSize:12, color:'var(--ms-success)' }}>
                           <Paperclip size={11} /> {att.name}
-                          <button type="button" onClick={() => setClosureAtts(p => p.filter((_,j) => j!==i))} style={{ background:'none', border:'none', cursor:'pointer', color:'#34d399', display:'flex', padding:0 }}><X size={11} /></button>
+                          <button type="button" onClick={() => setClosureAtts(p => p.filter((_,j) => j!==i))} style={{ background:'none', border:'none', cursor:'pointer', color:'var(--ms-success)', display:'flex', padding:0 }}><X size={11} /></button>
                         </div>
                       ))}
                     </div>
@@ -634,6 +719,47 @@ export default function IncidentDetail() {
           </div>
         </CollapsibleSection>
       )}
+
+      {showTargetDateExtend && (
+        <CollapsibleSection
+          title="Extend target date"
+          open={openSections.extendTarget}
+          onToggle={() => toggleSection('extendTarget')}
+          accent
+        >
+          <p style={{ fontSize:12, color:'var(--accent-amber)', margin:'0 0 12px' }}>
+            Current target date ({formatDate(incident.targetDate)}) has passed. Enter a new date and remark to extend.
+          </p>
+          <form onSubmit={handleExtendTargetDate} style={{ display:'flex', flexDirection:'column', gap:12 }}>
+            <div className="incident-form-grid-2">
+              <FormField label="New target date" required>
+                <Input
+                  type="date"
+                  value={extendForm.newTargetDate}
+                  min={new Date().toISOString().slice(0, 10)}
+                  onChange={e => setExtendForm(f => ({ ...f, newTargetDate: e.target.value }))}
+                />
+              </FormField>
+              <FormField label="Current target date">
+                <Input value={formatDate(incident.targetDate)} disabled />
+              </FormField>
+            </div>
+            <FormField label="Remark" required>
+              <Textarea
+                rows={3}
+                value={extendForm.remark}
+                onChange={e => setExtendForm(f => ({ ...f, remark: e.target.value }))}
+                placeholder="Reason for extending the target date…"
+              />
+            </FormField>
+            <div>
+              <Button type="submit" variant="primary" disabled={submitting}>
+                {submitting ? 'Saving…' : 'Extend target date'}
+              </Button>
+            </div>
+          </form>
+        </CollapsibleSection>
+      )}
       </div>
 
         </div>
@@ -644,7 +770,7 @@ export default function IncidentDetail() {
           </SidebarCard>
 
           {showIrtActions && (
-            <SidebarCard title="IRT Actions" style={{ borderColor: 'rgba(59,130,246,.35)' }}>
+            <SidebarCard title="IRT Actions" style={{ borderColor: 'var(--ms-brand)' }}>
               {showRcaReview && (
                 <p style={{ fontSize:13, color:'var(--text-secondary)', margin:'0 0 14px', lineHeight:1.5 }}>
                   Approve or reject the submitted RCA.
@@ -657,7 +783,7 @@ export default function IncidentDetail() {
               )}
               {rejectMode && (
                 <div style={{ marginBottom:14, padding:14, border:'1px solid rgba(244,63,94,.3)', borderRadius:8, background:'rgba(244,63,94,.06)' }}>
-                  <div style={{ fontWeight:600, fontSize:13, marginBottom:10, color:'#fb7185' }}>
+                  <div style={{ fontWeight:600, fontSize:13, marginBottom:10, color:'var(--ms-danger)' }}>
                     {rejectMode === 'rca' ? 'Reject RCA' : 'Reject Closure'}
                   </div>
                   <FormField label="Reason" required>
@@ -720,7 +846,9 @@ export default function IncidentDetail() {
                       <span style={{ fontSize:12, fontWeight:600, color:'var(--text-primary)' }}>{displayAction(entry.action)}</span>
                       <span style={{ fontSize:11, color:'var(--text-muted)', whiteSpace:'nowrap' }}>{new Date(entry.at).toLocaleDateString()}</span>
                     </div>
-                    <div style={{ fontSize:11, color:'var(--text-muted)', marginBottom:4 }}>{entry.by || entry.byEmail}</div>
+                    <div style={{ marginBottom:6 }}>
+                      <PersonLine name={entry.by} email={entry.byEmail} users={allUsers} size={20} />
+                    </div>
                     <div style={{ fontSize:12, color:'var(--text-secondary)', lineHeight:1.45 }}>{entry.comment || '—'}</div>
                   </div>
                 ))}

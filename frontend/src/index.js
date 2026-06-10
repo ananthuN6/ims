@@ -4,6 +4,9 @@ import { EventType } from '@azure/msal-browser';
 import { msalInstance } from './auth/msalConfig';
 import './index.css';
 import App from './App';
+import { initTheme } from './utils/theme';
+
+initTheme();
 
 msalInstance.initialize().then(() => {
   msalInstance.handleRedirectPromise().catch(() => {});
